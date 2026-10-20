@@ -1,0 +1,1278 @@
+{
+ "file": "xgs-sample.log",
+ "total_lines": 1395880,
+ "unparsed_lines": 0,
+ "lines_with_escaped_quotes": 0,
+ "max_line_length": 1742,
+ "total_bytes_of_log_text": 1521739920,
+ "avg_bytes_per_line": 1090,
+ "first_timestamp": "2026-10-03T15:45:28+0500",
+ "last_timestamp": "2026-10-03T16:18:00+0500",
+ "devices": [
+  [
+   "X33010KMQVXTJ26",
+   1395880
+  ]
+ ],
+ "lines_per_second": {
+  "distinct_seconds": 1185,
+  "min": 3,
+  "mean": 1178.0,
+  "median": 1133,
+  "p95": 2267,
+  "max": 2949
+ },
+ "lines_per_minute": [
+  [
+   "2026-10-03T15:45",
+   1612
+  ],
+  [
+   "2026-10-03T15:56",
+   40993
+  ],
+  [
+   "2026-10-03T15:57",
+   68566
+  ],
+  [
+   "2026-10-03T15:58",
+   66057
+  ],
+  [
+   "2026-10-03T15:59",
+   62932
+  ],
+  [
+   "2026-10-03T16:00",
+   66468
+  ],
+  [
+   "2026-10-03T16:01",
+   62589
+  ],
+  [
+   "2026-10-03T16:02",
+   66846
+  ],
+  [
+   "2026-10-03T16:03",
+   66000
+  ],
+  [
+   "2026-10-03T16:04",
+   67362
+  ],
+  [
+   "2026-10-03T16:05",
+   65662
+  ],
+  [
+   "2026-10-03T16:06",
+   64368
+  ],
+  [
+   "2026-10-03T16:07",
+   65257
+  ],
+  [
+   "2026-10-03T16:08",
+   63932
+  ],
+  [
+   "2026-10-03T16:09",
+   64616
+  ],
+  [
+   "2026-10-03T16:10",
+   61316
+  ],
+  [
+   "2026-10-03T16:11",
+   65626
+  ],
+  [
+   "2026-10-03T16:12",
+   64200
+  ],
+  [
+   "2026-10-03T16:13",
+   59880
+  ],
+  [
+   "2026-10-03T16:14",
+   62358
+  ],
+  [
+   "2026-10-03T16:15",
+   63449
+  ],
+  [
+   "2026-10-03T16:16",
+   63875
+  ],
+  [
+   "2026-10-03T16:17",
+   61459
+  ],
+  [
+   "2026-10-03T16:18",
+   457
+  ]
+ ],
+ "kinds": [
+  {
+   "log_type": "Firewall",
+   "component": "Firewall Rule",
+   "subtype": "Allowed",
+   "con_event": "Start",
+   "log_id": "010101600001",
+   "lines": 440259,
+   "pct": 31.5,
+   "avg_bytes": 1195,
+   "pct_no_user": 55.7
+  },
+  {
+   "log_type": "Firewall",
+   "component": "Firewall Rule",
+   "subtype": "Allowed",
+   "con_event": "Stop",
+   "log_id": "010101600001",
+   "lines": 401350,
+   "pct": 28.8,
+   "avg_bytes": 1349,
+   "pct_no_user": 59.6
+  },
+  {
+   "log_type": "Firewall",
+   "component": "Firewall Rule",
+   "subtype": "Denied",
+   "con_event": "",
+   "log_id": "010102600002",
+   "lines": 231167,
+   "pct": 16.6,
+   "avg_bytes": 842,
+   "pct_no_user": 61.9
+  },
+  {
+   "log_type": "Content Filtering",
+   "component": "HTTP",
+   "subtype": "Allowed",
+   "con_event": "",
+   "log_id": "050901616001",
+   "lines": 149509,
+   "pct": 10.7,
+   "avg_bytes": 905,
+   "pct_no_user": 22.5
+  },
+  {
+   "log_type": "Content Filtering",
+   "component": "HTTP",
+   "subtype": "Denied",
+   "con_event": "",
+   "log_id": "050902616002",
+   "lines": 58999,
+   "pct": 4.2,
+   "avg_bytes": 878,
+   "pct_no_user": 38.2
+  },
+  {
+   "log_type": "Firewall",
+   "component": "IP Spoof",
+   "subtype": "Denied",
+   "con_event": "",
+   "log_id": "011902605151",
+   "lines": 57603,
+   "pct": 4.1,
+   "avg_bytes": 566,
+   "pct_no_user": 100.0
+  },
+  {
+   "log_type": "Content Filtering",
+   "component": "Application",
+   "subtype": "Denied",
+   "con_event": "",
+   "log_id": "054402617051",
+   "lines": 56993,
+   "pct": 4.1,
+   "avg_bytes": 684,
+   "pct_no_user": 37.6
+  }
+ ],
+ "field_presence_pct_by_kind": {
+  "Firewall|Firewall Rule|Allowed|Start": {
+   "app_category": 19.4,
+   "app_filter_policy_id": 85.5,
+   "app_is_cloud": 100.0,
+   "app_name": 19.4,
+   "app_resolved_by": 100.0,
+   "app_risk": 19.4,
+   "app_technology": 19.4,
+   "con_event": 100.0,
+   "con_id": 100.0,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_mac": 100.0,
+   "dst_port": 99.7,
+   "dst_zone": 100.0,
+   "dst_zone_type": 100.0,
+   "ether_type": 100.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "fw_rule_type": 100.0,
+   "gw_id_request": 100.0,
+   "gw_name_request": 100.0,
+   "hb_status": 100.0,
+   "icmp_type": 0.3,
+   "in_display_interface": 100.0,
+   "in_interface": 100.0,
+   "ips_policy_id": 85.2,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_occurrence": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "nat_rule_id": 100.0,
+   "nat_rule_name": 97.9,
+   "out_display_interface": 100.0,
+   "out_interface": 100.0,
+   "protocol": 100.0,
+   "qualifier": 100.0,
+   "sdwan_profile_id_request": 45.8,
+   "sdwan_profile_name_request": 45.8,
+   "sdwan_route_id_request": 99.6,
+   "sdwan_route_name_request": 99.6,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_mac": 100.0,
+   "src_port": 99.7,
+   "src_trans_ip": 98.0,
+   "src_trans_port": 0.3,
+   "src_zone": 100.0,
+   "src_zone_type": 100.0,
+   "timestamp": 100.0,
+   "user_group": 46.3,
+   "user_name": 44.3,
+   "web_policy_id": 85.5
+  },
+  "Firewall|Firewall Rule|Allowed|Stop": {
+   "app_category": 91.3,
+   "app_filter_policy_id": 84.1,
+   "app_is_cloud": 100.0,
+   "app_name": 91.3,
+   "app_resolved_by": 100.0,
+   "app_risk": 91.3,
+   "app_technology": 91.3,
+   "bytes_received": 97.9,
+   "bytes_sent": 100.0,
+   "classification": 14.8,
+   "con_event": 100.0,
+   "con_id": 100.0,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_mac": 100.0,
+   "dst_port": 99.7,
+   "dst_zone": 100.0,
+   "dst_zone_type": 100.0,
+   "duration": 99.8,
+   "ether_type": 100.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "fw_rule_type": 100.0,
+   "gw_id_request": 100.0,
+   "gw_name_request": 100.0,
+   "hb_status": 100.0,
+   "icmp_type": 0.3,
+   "in_display_interface": 100.0,
+   "in_interface": 100.0,
+   "ips_policy_id": 83.9,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_occurrence": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "nat_rule_id": 100.0,
+   "nat_rule_name": 97.7,
+   "out_display_interface": 100.0,
+   "out_interface": 100.0,
+   "packets_received": 97.9,
+   "packets_sent": 100.0,
+   "protocol": 100.0,
+   "qualifier": 100.0,
+   "sdwan_profile_id_request": 42.2,
+   "sdwan_profile_name_request": 42.2,
+   "sdwan_route_id_request": 99.7,
+   "sdwan_route_name_request": 99.7,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_mac": 100.0,
+   "src_port": 99.7,
+   "src_trans_ip": 97.7,
+   "src_trans_port": 0.3,
+   "src_zone": 100.0,
+   "src_zone_type": 100.0,
+   "timestamp": 100.0,
+   "user_group": 42.7,
+   "user_name": 40.4,
+   "web_policy_id": 84.1
+  },
+  "Firewall|Firewall Rule|Denied|": {
+   "app_category": 0.0,
+   "app_filter_policy_id": 79.5,
+   "app_is_cloud": 100.0,
+   "app_name": 0.0,
+   "app_resolved_by": 100.0,
+   "app_risk": 0.0,
+   "app_technology": 0.0,
+   "bytes_received": 0.4,
+   "bytes_sent": 0.4,
+   "con_id": 0.8,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_mac": 0.8,
+   "dst_port": 100.0,
+   "dst_zone": 0.8,
+   "dst_zone_type": 0.8,
+   "duration": 0.4,
+   "ether_type": 100.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "fw_rule_type": 100.0,
+   "gw_id_request": 0.8,
+   "gw_name_request": 0.8,
+   "hb_status": 100.0,
+   "in_display_interface": 100.0,
+   "in_interface": 100.0,
+   "ips_policy_id": 79.5,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_occurrence": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "nat_rule_id": 100.0,
+   "nat_rule_name": 0.0,
+   "out_display_interface": 100.0,
+   "out_interface": 100.0,
+   "packets_received": 0.4,
+   "packets_sent": 0.4,
+   "protocol": 100.0,
+   "qualifier": 100.0,
+   "sdwan_profile_id_request": 0.8,
+   "sdwan_profile_name_request": 0.8,
+   "sdwan_route_id_request": 0.8,
+   "sdwan_route_name_request": 0.8,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_mac": 100.0,
+   "src_port": 100.0,
+   "src_trans_ip": 0.0,
+   "src_zone": 0.8,
+   "src_zone_type": 0.8,
+   "timestamp": 100.0,
+   "user_group": 44.6,
+   "user_name": 38.1,
+   "web_policy_id": 80.6
+  },
+  "Firewall|IP Spoof|Denied|": {
+   "app_is_cloud": 100.0,
+   "app_resolved_by": 100.0,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "dst_country": 99.7,
+   "dst_ip": 100.0,
+   "dst_port": 94.3,
+   "ether_type": 100.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_type": 100.0,
+   "hb_status": 100.0,
+   "icmp_type": 0.0,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_occurrence": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "nat_rule_id": 100.0,
+   "protocol": 100.0,
+   "qualifier": 100.0,
+   "severity": 100.0,
+   "src_country": 99.7,
+   "src_ip": 100.0,
+   "src_port": 94.6,
+   "timestamp": 100.0
+  },
+  "Content Filtering|Application|Denied|": {
+   "app_category": 100.0,
+   "app_filter_policy_id": 100.0,
+   "app_is_cloud": 100.0,
+   "app_name": 100.0,
+   "app_resolved_by": 100.0,
+   "app_risk": 100.0,
+   "app_technology": 100.0,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_port": 100.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "protocol": 100.0,
+   "qualifier": 100.0,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_port": 100.0,
+   "timestamp": 100.0,
+   "user_group": 62.4,
+   "user_name": 62.4
+  },
+  "Content Filtering|HTTP|Allowed|": {
+   "app_category": 2.3,
+   "app_is_cloud": 100.0,
+   "app_name": 2.3,
+   "app_risk": 2.3,
+   "bytes_received": 96.0,
+   "bytes_sent": 100.0,
+   "con_id": 100.0,
+   "content_type": 17.2,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "domain": 100.0,
+   "download_file_name": 13.7,
+   "download_file_type": 13.6,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_port": 100.0,
+   "dst_zone": 100.0,
+   "dst_zone_type": 100.0,
+   "exceptions": 35.2,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "http_category": 100.0,
+   "http_category_type": 99.9,
+   "http_referer": 0.1,
+   "http_status": 100.0,
+   "http_user_agent": 22.6,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "protocol": 100.0,
+   "reason": 0.0,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_port": 100.0,
+   "src_zone": 100.0,
+   "src_zone_type": 100.0,
+   "timestamp": 100.0,
+   "transaction_id": 22.6,
+   "url": 100.0,
+   "used_quota": 100.0,
+   "user_group": 77.5,
+   "user_name": 77.5,
+   "web_policy_id": 100.0
+  },
+  "Content Filtering|HTTP|Denied|": {
+   "app_category": 0.0,
+   "app_is_cloud": 100.0,
+   "app_name": 0.0,
+   "app_risk": 0.0,
+   "bytes_received": 0.1,
+   "bytes_sent": 54.2,
+   "con_id": 100.0,
+   "content_type": 0.0,
+   "device_model": 100.0,
+   "device_name": 100.0,
+   "device_serial_id": 100.0,
+   "domain": 100.0,
+   "dst_country": 100.0,
+   "dst_ip": 100.0,
+   "dst_port": 100.0,
+   "dst_zone": 100.0,
+   "dst_zone_type": 100.0,
+   "exceptions": 0.0,
+   "fw_rule_id": 100.0,
+   "fw_rule_name": 100.0,
+   "fw_rule_section": 100.0,
+   "http_category": 100.0,
+   "http_category_type": 99.5,
+   "http_referer": 0.1,
+   "http_status": 100.0,
+   "http_user_agent": 57.2,
+   "log_component": 100.0,
+   "log_id": 100.0,
+   "log_subtype": 100.0,
+   "log_type": 100.0,
+   "log_version": 100.0,
+   "protocol": 100.0,
+   "reason": 0.3,
+   "severity": 100.0,
+   "src_country": 100.0,
+   "src_ip": 100.0,
+   "src_port": 100.0,
+   "src_zone": 100.0,
+   "src_zone_type": 100.0,
+   "timestamp": 100.0,
+   "transaction_id": 54.2,
+   "url": 100.0,
+   "used_quota": 100.0,
+   "user_group": 69.2,
+   "user_name": 61.8,
+   "web_policy_id": 100.0
+  }
+ },
+ "identity": {
+  "distinct_users": 720,
+  "distinct_empty_user_src_ips": 1487,
+  "empty_user_ips_resolvable_from_other_lines_pct": 46.4,
+  "src_ips_seen_with_more_than_one_user": 31,
+  "no_user_pct_by_src_zone": {
+   "LAN": {
+    "lines": 699030,
+    "no_user_pct": 26.8
+   },
+   "WiFi": {
+    "lines": 353027,
+    "no_user_pct": 100.0
+   },
+   "?": {
+    "lines": 343823,
+    "no_user_pct": 64.5
+   }
+  },
+  "no_user_pct_by_rule": {
+   "Wifi": {
+    "lines": 488595,
+    "no_user_pct": 100.0
+   },
+   "UTM-Bronze": {
+    "lines": 196329,
+    "no_user_pct": 0.0
+   },
+   "Servers": {
+    "lines": 122170,
+    "no_user_pct": 99.8
+   },
+   "UTM-Gold": {
+    "lines": 109298,
+    "no_user_pct": 0.0
+   },
+   "UTM-Silver-MM": {
+    "lines": 80348,
+    "no_user_pct": 0.0
+   },
+   "UTM-Bronnze_Acc": {
+    "lines": 77655,
+    "no_user_pct": 0.0
+   },
+   "N/A": {
+    "lines": 57603,
+    "no_user_pct": 100.0
+   },
+   "UTM-SocialMedia": {
+    "lines": 43800,
+    "no_user_pct": 85.2
+   },
+   "OpenGroup-Blocked": {
+    "lines": 29635,
+    "no_user_pct": 0.0
+   },
+   "Int - Jamia Student Wi-Fi": {
+    "lines": 27285,
+    "no_user_pct": 100.0
+   },
+   "IP-WiFi": {
+    "lines": 19175,
+    "no_user_pct": 100.0
+   },
+   "UTM-Bronnze_MM": {
+    "lines": 16018,
+    "no_user_pct": 0.0
+   },
+   "Darul-Ifta-IEC-Block": {
+    "lines": 15198,
+    "no_user_pct": 0.0
+   },
+   "UTM-Silver": {
+    "lines": 13623,
+    "no_user_pct": 0.0
+   },
+   "UTM-Bronz-Custom": {
+    "lines": 13442,
+    "no_user_pct": 0.0
+   },
+   "UTM-Gold -Custom": {
+    "lines": 13031,
+    "no_user_pct": 0.0
+   },
+   "IP-CCTV": {
+    "lines": 7569,
+    "no_user_pct": 0.0
+   },
+   "UTM-Platinum": {
+    "lines": 7050,
+    "no_user_pct": 0.0
+   },
+   "Taweezat": {
+    "lines": 5824,
+    "no_user_pct": 0.0
+   },
+   "IP-Gold": {
+    "lines": 5567,
+    "no_user_pct": 70.9
+   },
+   "UTM-Gold-Shopping": {
+    "lines": 5487,
+    "no_user_pct": 0.0
+   },
+   "UTM-Bronze_Acc_Shopping": {
+    "lines": 5440,
+    "no_user_pct": 0.0
+   },
+   "Dawateislami Services": {
+    "lines": 5186,
+    "no_user_pct": 10.1
+   },
+   "Arabic Upload": {
+    "lines": 4324,
+    "no_user_pct": 0.8
+   },
+   "INT Guest": {
+    "lines": 4204,
+    "no_user_pct": 100.0
+   }
+  }
+ },
+ "web": {
+  "lines": 208508,
+  "port_443_pct": 64.8,
+  "http_status_0_pct": 58.3,
+  "https_urls": 138368,
+  "https_urls_with_path_or_query_pct": 0.0,
+  "http_status_top": [
+   [
+    "0",
+    121558
+   ],
+   [
+    "403",
+    55057
+   ],
+   [
+    "200",
+    25606
+   ],
+   [
+    "206",
+    3414
+   ],
+   [
+    "204",
+    1978
+   ],
+   [
+    "304",
+    725
+   ],
+   [
+    "400",
+    70
+   ],
+   [
+    "301",
+    53
+   ]
+  ],
+  "top_domains": [
+   [
+    "ctldl.windowsupdate.com",
+    25202
+   ],
+   [
+    "www.msftconnecttest.com",
+    17246
+   ],
+   [
+    "test-gateway.instagram.com",
+    8865
+   ],
+   [
+    "www.google.com",
+    6973
+   ],
+   [
+    "msedge.b.tlu.dl.delivery.mp.microsoft.com",
+    6705
+   ],
+   [
+    "web.whatsapp.com",
+    3819
+   ],
+   [
+    "ocsp.digicert.com",
+    2778
+   ],
+   [
+    "play.google.com",
+    2673
+   ],
+   [
+    "crl3.digicert.com",
+    2569
+   ],
+   [
+    "www.youtube.com",
+    2568
+   ],
+   [
+    "mpa.autodesk.com",
+    2559
+   ],
+   [
+    "mdav.us.endpoint.security.microsoft.com",
+    2552
+   ],
+   [
+    "connectivitycheck.gstatic.com",
+    2440
+   ],
+   [
+    "gateway.icloud.com",
+    2243
+   ],
+   [
+    "slscr.update.microsoft.com",
+    2198
+   ],
+   [
+    "watson.events.data.microsoft.com",
+    2178
+   ],
+   [
+    "dit.whatsapp.net",
+    2173
+   ],
+   [
+    "signaler-pa.clients6.google.com",
+    2082
+   ],
+   [
+    "i.instagram.com",
+    1943
+   ],
+   [
+    "ssl.gstatic.com",
+    1856
+   ],
+   [
+    "edgedl.me.gvt1.com",
+    1840
+   ],
+   [
+    "graph.facebook.com",
+    1824
+   ],
+   [
+    "media.fkhi10-1.fna.whatsapp.net",
+    1817
+   ],
+   [
+    "accounts.google.com",
+    1784
+   ],
+   [
+    "umwatson.events.data.microsoft.com",
+    1730
+   ]
+  ],
+  "top_categories": [
+   [
+    "Information Technology",
+    89312
+   ],
+   [
+    "Software Updates",
+    27876
+   ],
+   [
+    "UTM-Dawateislami",
+    23960
+   ],
+   [
+    "Social Networking",
+    17081
+   ],
+   [
+    "Online Chat",
+    13894
+   ],
+   [
+    "Content Delivery",
+    9621
+   ],
+   [
+    "CRL and OCSP",
+    5608
+   ],
+   [
+    "Video hosting",
+    4173
+   ],
+   [
+    "General Business",
+    3983
+   ],
+   [
+    "Personal Network Storage",
+    2510
+   ],
+   [
+    "Search Engines",
+    2081
+   ],
+   [
+    "IPAddress",
+    1877
+   ],
+   [
+    "Advertisements",
+    1579
+   ],
+   [
+    "Reference",
+    1282
+   ],
+   [
+    "Voice & Video Calls",
+    578
+   ],
+   [
+    "Entertainment",
+    577
+   ],
+   [
+    "None",
+    354
+   ],
+   [
+    "Online Shopping",
+    342
+   ],
+   [
+    "Web E-Mail",
+    239
+   ],
+   [
+    "ParkedDomain",
+    197
+   ],
+   [
+    "News",
+    160
+   ],
+   [
+    "Financial services",
+    148
+   ],
+   [
+    "Download Freeware & Shareware",
+    140
+   ],
+   [
+    "Portal Sites",
+    115
+   ],
+   [
+    "Business Networking",
+    112
+   ]
+  ],
+  "distinct_domains": 4537,
+  "web_conids_matching_firewall_stop_pct": 84.7
+ },
+ "app_control_top": [
+  [
+   "Windows Update",
+   24118
+  ],
+  [
+   "ISAKMP VPN",
+   16673
+  ],
+  [
+   "Youtube Website",
+   5719
+  ],
+  [
+   "Windows Store",
+   4897
+  ],
+  [
+   "AnyDesk",
+   1507
+  ],
+  [
+   "Kaspersky Antivirus Update",
+   1242
+  ],
+  [
+   "UltraViewer",
+   902
+  ],
+  [
+   "Youtube Video Streaming",
+   682
+  ],
+  [
+   "Urban VPN",
+   222
+  ],
+  [
+   "Bing Website",
+   134
+  ],
+  [
+   "Kwai",
+   130
+  ],
+  [
+   "Torrent Clients P2P",
+   127
+  ],
+  [
+   "Instagram Visual Media",
+   98
+  ],
+  [
+   "Multi Thread File Transfer",
+   78
+  ],
+  [
+   "Opera Update",
+   61
+  ],
+  [
+   "Facebook Website",
+   58
+  ],
+  [
+   "Office 365",
+   50
+  ],
+  [
+   "BITS",
+   42
+  ],
+  [
+   "Manual Proxy Surfing",
+   35
+  ],
+  [
+   "Chess.com",
+   31
+  ],
+  [
+   "Skype",
+   25
+  ],
+  [
+   "Xbox LIVE",
+   22
+  ],
+  [
+   "Facebook Graph API",
+   21
+  ],
+  [
+   "Avast Antivirus Update",
+   16
+  ],
+  [
+   "Playwire",
+   16
+  ]
+ ],
+ "bandwidth_from_stop_events": {
+  "stop_events": 401350,
+  "total_bytes": 43603468348,
+  "duration_s_median": 15.0,
+  "duration_s_max": 182208,
+  "top_users_or_ips_by_bytes_anonymized": [
+   [
+    "user_499f74",
+    1741244363
+   ],
+   [
+    "user_c28bec",
+    1119960118
+   ],
+   [
+    "user_5bf6a7",
+    898387127
+   ],
+   [
+    "user_db1db9",
+    743755563
+   ],
+   [
+    "user_9afa84",
+    722992194
+   ],
+   [
+    "(no user) 172.16.163.118",
+    656851456
+   ],
+   [
+    "user_4de045",
+    631326921
+   ],
+   [
+    "user_dee1e9",
+    566467710
+   ],
+   [
+    "(no user) 172.16.209.131",
+    516512814
+   ],
+   [
+    "user_e059b1",
+    493230567
+   ],
+   [
+    "user_a30f1a",
+    486897971
+   ],
+   [
+    "user_f3a0d4",
+    483998102
+   ],
+   [
+    "user_afeb5d",
+    457129866
+   ],
+   [
+    "user_9d2a72",
+    455104547
+   ],
+   [
+    "user_eda7b7",
+    427590521
+   ],
+   [
+    "user_f4273f",
+    424924526
+   ],
+   [
+    "user_ec952a",
+    414689841
+   ],
+   [
+    "user_4bc924",
+    404544105
+   ],
+   [
+    "user_51ef3c",
+    357472576
+   ],
+   [
+    "user_93fb24",
+    329540020
+   ],
+   [
+    "user_c3fcfe",
+    309298339
+   ],
+   [
+    "(no user) 192.168.112.188",
+    305866546
+   ],
+   [
+    "user_955468",
+    294609100
+   ],
+   [
+    "user_c6c142",
+    286382573
+   ],
+   [
+    "user_b1c1ac",
+    282621301
+   ]
+  ],
+  "top_rules_by_bytes": [
+   [
+    "UTM-Bronze",
+    9656966941
+   ],
+   [
+    "UTM-Gold",
+    9042695836
+   ],
+   [
+    "Wifi",
+    5151818059
+   ],
+   [
+    "UTM-Silver-MM",
+    3742699211
+   ],
+   [
+    "UTM-Bronnze_Acc",
+    2747512054
+   ],
+   [
+    "Dawateislami Services",
+    2109787263
+   ],
+   [
+    "Arabic Upload",
+    1184108502
+   ],
+   [
+    "UTM-Gold -Custom",
+    1093468448
+   ],
+   [
+    "UTM-SocialMedia",
+    980561426
+   ],
+   [
+    "UTM-Bronz-Custom",
+    967892833
+   ],
+   [
+    "Youtube Allowed",
+    927753854
+   ],
+   [
+    "IP-Gold",
+    899981788
+   ],
+   [
+    "Int - Jamia Student Wi-Fi",
+    865731796
+   ],
+   [
+    "IP-WiFi",
+    809009959
+   ],
+   [
+    "UTM-Silver",
+    750542337
+   ],
+   [
+    "UTM-Bronnze_MM",
+    725046710
+   ],
+   [
+    "IP-Platinum",
+    493304297
+   ],
+   [
+    "IP-CCTV",
+    424924526
+   ],
+   [
+    "UTM-Platinum",
+    222342184
+   ],
+   [
+    "Per-IP-20Mbps-Guarantee",
+    201651767
+   ],
+   [
+    "IP-Bronze_Acc",
+    145748797
+   ],
+   [
+    "UTM-Gold-Shopping",
+    140768569
+   ],
+   [
+    "Servers",
+    90162269
+   ],
+   [
+    "IP-SilverMM",
+    67458518
+   ],
+   [
+    "UTM-Platinum-Shopping",
+    34367627
+   ]
+  ],
+  "top_dst_ports_by_connections": [
+   [
+    "443",
+    262121
+   ],
+   [
+    "53",
+    77276
+   ],
+   [
+    "80",
+    41730
+   ],
+   [
+    "853",
+    3525
+   ],
+   [
+    "5222",
+    1854
+   ],
+   [
+    "3478",
+    1349
+   ],
+   [
+    "?",
+    1127
+   ],
+   [
+    "123",
+    991
+   ],
+   [
+    "5228",
+    831
+   ],
+   [
+    "8800",
+    559
+   ]
+  ]
+ },
+ "event_logs": []
+}

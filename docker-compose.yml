@@ -1,0 +1,71 @@
+name: sophos-reporter
+
+x-app: &app
+  build: .
+  image: sophos-reporter:local
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sfos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: sfos
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sfos -d sfos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *app
+    command: ["sfos-api"]
+    environment:
+      DATABASE_URL: postgres://sfos@db:5432/sfos
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      TENANT_SLUG: ${TENANT_SLUG:-default}
+      TENANT_NAME: ${TENANT_NAME:-Default site}
+      RETENTION_HOURS: ${RETENTION_HOURS:-6}
+      RUST_LOG: ${RUST_LOG:-info}
+      API_ADDR: 0.0.0.0:8080
+    ports:
+      - "${HOST_BIND_IP:-0.0.0.0}:${API_PORT:-8082}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  ingest:
+    <<: *app
+    command: ["sfos-ingest"]
+    environment:
+      DATABASE_URL: postgres://sfos@db:5432/sfos
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      TENANT_SLUG: ${TENANT_SLUG:-default}
+      TENANT_NAME: ${TENANT_NAME:-Default site}
+      TENANT_MAP: ${TENANT_MAP:-}
+      ALLOWED_SOURCES: ${ALLOWED_SOURCES:-}
+      SYSLOG_UDP_ADDR: 0.0.0.0:5514
+      SYSLOG_TCP_ADDR: 0.0.0.0:5514
+      HEALTH_ADDR: 0.0.0.0:8083
+      RETENTION_HOURS: ${RETENTION_HOURS:-6}
+      PARTITIONS_AHEAD_HOURS: ${PARTITIONS_AHEAD_HOURS:-48}
+      BATCH_SIZE: ${BATCH_SIZE:-5000}
+      BATCH_MS: ${BATCH_MS:-2000}
+      DEFAULT_TZ_OFFSET_MINUTES: ${TZ_OFFSET_MINUTES:-0}
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "${HOST_BIND_IP:-0.0.0.0}:${SYSLOG_PORT:-5514}:5514/udp"
+      - "${HOST_BIND_IP:-0.0.0.0}:${SYSLOG_PORT:-5514}:5514/tcp"
+      - "${HOST_BIND_IP:-0.0.0.0}:${INGEST_HEALTH_PORT:-8083}:8083"
+
+volumes:
+  db-data:

@@ -1,0 +1,14 @@
+[package]
+name = "sfos-core"
+version.workspace = true
+edition.workspace = true
+
+description = "Sophos Firewall (SFOS) syslog parser and normalized event model"
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
