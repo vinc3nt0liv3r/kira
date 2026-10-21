@@ -3,6 +3,7 @@ import { api } from "./api";
 import { fmtAgo, fmtNumber } from "./format";
 import type { EventRow, Meta, Overview, TopRow } from "./types";
 import { EventsTable } from "./components/EventsTable";
+import { RetentionControl } from "./components/RetentionControl";
 import { KpiCards } from "./components/KpiCards";
 import { CollectorPanel, SecurityPanel } from "./components/SidePanels";
 import { TopPanel } from "./components/TopPanel";
@@ -197,6 +198,8 @@ export default function App() {
                 {meta.tenant.name}
               </span>
             ) : null}
+
+            <RetentionControl />
 
             <button
               type="button"

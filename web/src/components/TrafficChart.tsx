@@ -1,8 +1,7 @@
-import { useMemo } from "react";
 import {
-  Area,
-  AreaChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -12,7 +11,7 @@ import { fmtBytes, fmtClock, fmtNumber, fmtRangeTick } from "../format";
 import type { SeriesPoint } from "../types";
 import { Card, CardHeader, Empty } from "./ui";
 
-export type TrafficMode = "requests" | "bandwidth";
+export type TrafficMode = "requests" | "volume";
 
 interface TooltipEntry {
   dataKey?: string | number;
@@ -44,7 +43,7 @@ function ChartTooltip({
           />
           <span className="text-slate-400">{entry.name}</span>
           <span className="tabular ml-auto font-medium">
-            {mode === "bandwidth" ? fmtBytes(Number(entry.value)) : fmtNumber(Number(entry.value))}
+            {mode === "volume" ? fmtBytes(Number(entry.value)) : fmtNumber(Number(entry.value))}
           </span>
         </p>
       ))}
@@ -63,20 +62,20 @@ export function TrafficChart({
   onMode: (mode: TrafficMode) => void;
   spanHours: number;
 }) {
-  const data = useMemo(
-    () => series.map((point) => ({ ...point, down: point.bytes_down, up: point.bytes_up })),
-    [series],
-  );
-  const bandwidth = mode === "bandwidth";
+  const volume = mode === "volume";
 
   return (
     <Card className="flex h-full flex-col">
       <CardHeader
         title="Traffic over time"
-        hint={bandwidth ? "Bytes by direction, per bucket" : "Logged requests by decision"}
+        hint={
+          volume
+            ? "Bytes transferred per time bucket (volume, not throughput)"
+            : "Logged requests by decision"
+        }
         right={
           <div className="flex rounded-lg border border-white/10 bg-black/20 p-0.5 text-[11px]">
-            {(["requests", "bandwidth"] as const).map((option) => (
+            {(["requests", "volume"] as const).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -87,7 +86,7 @@ export function TrafficChart({
                     : "text-slate-500 hover:text-slate-300"
                 }`}
               >
-                {option}
+                {option === "volume" ? "data volume" : option}
               </button>
             ))}
           </div>
@@ -99,25 +98,7 @@ export function TrafficChart({
       ) : (
         <div className="mt-3 h-[268px] w-full pr-3">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="fillAllowed" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#34d399" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#34d399" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="fillBlocked" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#fb7185" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#fb7185" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="fillDown" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="fillUp" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#a78bfa" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
+            <LineChart data={series} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
               <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="t"
@@ -129,7 +110,7 @@ export function TrafficChart({
                 interval="preserveStartEnd"
               />
               <YAxis
-                tickFormatter={(value: number) => (bandwidth ? fmtBytes(value) : fmtNumber(value))}
+                tickFormatter={(value: number) => (volume ? fmtBytes(value) : fmtNumber(value))}
                 tick={{ fill: "#64748b", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
@@ -139,54 +120,50 @@ export function TrafficChart({
                 content={<ChartTooltip mode={mode} />}
                 cursor={{ stroke: "#334155", strokeDasharray: "3 3" }}
               />
-              {bandwidth ? (
+              {volume ? (
                 <>
-                  <Area
-                    type="monotone"
-                    dataKey="down"
+                  <Line
+                    type="linear"
+                    dataKey="bytes_down"
                     name="Downloaded"
-                    stackId="traffic"
                     stroke="#22d3ee"
                     strokeWidth={1.6}
-                    fill="url(#fillDown)"
                     isAnimationActive={false}
+                    dot={false}
                   />
-                  <Area
-                    type="monotone"
-                    dataKey="up"
+                  <Line
+                    type="linear"
+                    dataKey="bytes_up"
                     name="Uploaded"
-                    stackId="traffic"
                     stroke="#a78bfa"
                     strokeWidth={1.6}
-                    fill="url(#fillUp)"
                     isAnimationActive={false}
+                    dot={false}
                   />
                 </>
               ) : (
                 <>
-                  <Area
-                    type="monotone"
+                  <Line
+                    type="linear"
                     dataKey="allowed"
                     name="Allowed"
-                    stackId="traffic"
                     stroke="#34d399"
                     strokeWidth={1.6}
-                    fill="url(#fillAllowed)"
                     isAnimationActive={false}
+                    dot={false}
                   />
-                  <Area
-                    type="monotone"
+                  <Line
+                    type="linear"
                     dataKey="blocked"
                     name="Blocked"
-                    stackId="traffic"
                     stroke="#fb7185"
                     strokeWidth={1.6}
-                    fill="url(#fillBlocked)"
                     isAnimationActive={false}
+                    dot={false}
                   />
                 </>
               )}
-            </AreaChart>
+            </LineChart>
           </ResponsiveContainer>
         </div>
       )}

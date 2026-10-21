@@ -46,12 +46,51 @@ async fn main() -> Result<()> {
         .transpose()?
         .unwrap_or(6)
         .clamp(1, 168);
+    let statement_timeout_ms: u64 = std::env::var("API_STATEMENT_TIMEOUT_MS")
+        .ok()
+        .map(|value| {
+            value
+                .parse()
+                .with_context(|| format!("invalid API_STATEMENT_TIMEOUT_MS={value:?}"))
+        })
+        .transpose()?
+        .unwrap_or(10_000);
+    anyhow::ensure!(
+        (1..=120_000).contains(&statement_timeout_ms),
+        "API_STATEMENT_TIMEOUT_MS must be between 1 and 120000"
+    );
 
     let database_password = std::env::var("DATABASE_PASSWORD").ok();
-    let store =
-        Store::connect_with_password(&database_url, database_password.as_deref(), db_pool_size)?;
+    let retention_admin_token = std::env::var("RETENTION_ADMIN_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            anyhow::ensure!(
+                (32..=256).contains(&token.len()),
+                "RETENTION_ADMIN_TOKEN must be between 32 and 256 characters"
+            );
+            Ok::<_, anyhow::Error>(std::sync::Arc::<str>::from(token))
+        })
+        .transpose()?;
+    let postgres_options = format!("-c statement_timeout={statement_timeout_ms}");
+    let store = Store::connect_with_password_and_options(
+        &database_url,
+        database_password.as_deref(),
+        db_pool_size,
+        Some(&postgres_options),
+    )?;
     store.migrate().await.context("database migration failed")?;
+    store
+        .initialize_global_retention(raw_retention_hours)
+        .await?;
     store.ensure_tenant(&tenant_slug, &tenant_name).await?;
+    let query_concurrency = db_pool_size.saturating_sub(1).clamp(1, 2);
+    let rollups_ready = store.rollups_ready().await?;
+    if !rollups_ready {
+        tracing::warn!(
+            "historical rollups are not ready; dashboard aggregate requests may scan retained raw events"
+        );
+    }
 
     if !web_dir.join("index.html").exists() {
         tracing::warn!(
@@ -63,7 +102,8 @@ async fn main() -> Result<()> {
     let state = AppState {
         store,
         default_slug: Some(tenant_slug),
-        raw_retention_hours,
+        retention_admin_token,
+        query_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(query_concurrency)),
     };
 
     let index = web_dir.join("index.html");
@@ -74,6 +114,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/overview", get(api::overview))
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/events", get(api::events))
+        .route(
+            "/api/v1/retention",
+            get(api::retention_preview).put(api::update_retention),
+        )
         .fallback_service(static_files)
         .layer(CompressionLayer::new())
         .with_state(state);

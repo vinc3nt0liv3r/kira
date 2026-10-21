@@ -28,19 +28,33 @@ trap cleanup EXIT
 
 source_counts=$(docker compose exec -T db psql -U sfos -d sfos -X -At -F ',' \
   -v ON_ERROR_STOP=1 \
-  -c "SELECT (SELECT count(*) FROM events), (SELECT count(*) FROM tenants), (SELECT count(*) FROM schema_migrations)")
+  -c "SELECT (SELECT count(*) FROM events),
+             (SELECT count(*) FROM tenants),
+             (SELECT count(*) FROM schema_migrations),
+             (SELECT count(*) FROM event_rollups),
+             (SELECT count(*) FROM device_activity),
+             (SELECT COALESCE(sum(events), 0) FROM event_rollups WHERE dimension = 'overview'),
+             (SELECT history_ready::int FROM event_rollup_state WHERE singleton),
+             (SELECT retention_hours FROM global_retention WHERE singleton)")
 docker compose exec -T db pg_dump -U sfos --format=custom --compress=9 sfos >"$backup"
 docker compose exec -T db createdb -U sfos "$restore_db"
 docker compose exec -T db pg_restore -U sfos --no-owner --no-acl --exit-on-error \
   -d "$restore_db" <"$backup"
 restored_counts=$(docker compose exec -T db psql -U sfos -d "$restore_db" -X -At -F ',' \
   -v ON_ERROR_STOP=1 \
-  -c "SELECT (SELECT count(*) FROM events), (SELECT count(*) FROM tenants), (SELECT count(*) FROM schema_migrations)")
+  -c "SELECT (SELECT count(*) FROM events),
+             (SELECT count(*) FROM tenants),
+             (SELECT count(*) FROM schema_migrations),
+             (SELECT count(*) FROM event_rollups),
+             (SELECT count(*) FROM device_activity),
+             (SELECT COALESCE(sum(events), 0) FROM event_rollups WHERE dimension = 'overview'),
+             (SELECT history_ready::int FROM event_rollup_state WHERE singleton),
+             (SELECT retention_hours FROM global_retention WHERE singleton)")
 
 if [ "$source_counts" != "$restored_counts" ]; then
-  echo "FAIL  restored database counts differ (source=$source_counts restored=$restored_counts)" >&2
+  echo "FAIL  restored database state differs (source=$source_counts restored=$restored_counts)" >&2
   exit 1
 fi
 
-echo "PASS  backup restored into $restore_db (events, tenants, and migrations match: $source_counts)"
+echo "PASS  backup restored into $restore_db (raw events, tenants, migrations, rollup rows, summarized events, readiness, and global retention match: $source_counts)"
 echo "backup archive size: $(du -h "$backup" | cut -f1)"

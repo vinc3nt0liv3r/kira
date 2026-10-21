@@ -35,6 +35,7 @@ pub const COLUMNS: &[&str] = &[
     "referer",
     "user_agent",
     "category",
+    "category_type",
     "application",
     "application_category",
     "application_risk",
@@ -69,7 +70,11 @@ pub fn encode_row(tenant_id: Uuid, ev: &Event, out: &mut String) {
     let row_start = out.len();
     let mut first = true;
     raw(out, &mut first, &tenant_id.to_string());
-    raw(out, &mut first, &ev.ts.format("%Y-%m-%d %H:%M:%S%.6f%:z").to_string());
+    raw(
+        out,
+        &mut first,
+        &ev.ts.format("%Y-%m-%d %H:%M:%S%.6f%:z").to_string(),
+    );
 
     text(out, &mut first, ev.device_id.as_deref());
     text(out, &mut first, ev.device_name.as_deref());
@@ -104,6 +109,7 @@ pub fn encode_row(tenant_id: Uuid, ev: &Event, out: &mut String) {
     text(out, &mut first, ev.referer.as_deref());
     text(out, &mut first, ev.user_agent.as_deref());
     text(out, &mut first, ev.category.as_deref());
+    text(out, &mut first, ev.category_type.as_deref());
     text(out, &mut first, ev.application.as_deref());
     text(out, &mut first, ev.application_category.as_deref());
     number(out, &mut first, ev.application_risk);
@@ -206,9 +212,18 @@ mod tests {
         assert_eq!(fields[0], "00000000-0000-0000-0000-000000000000");
         assert!(fields[1].starts_with("2025-04-14 10:32:00"));
         assert!(fields[1].ends_with("+00:00"));
-        assert_eq!(fields[COLUMNS.iter().position(|c| *c == "domain").unwrap()], "www.google.com");
-        assert_eq!(fields[COLUMNS.iter().position(|c| *c == "action").unwrap()], "blocked");
-        assert_eq!(fields[COLUMNS.iter().position(|c| *c == "sent_bytes").unwrap()], "512");
+        assert_eq!(
+            fields[COLUMNS.iter().position(|c| *c == "domain").unwrap()],
+            "www.google.com"
+        );
+        assert_eq!(
+            fields[COLUMNS.iter().position(|c| *c == "action").unwrap()],
+            "blocked"
+        );
+        assert_eq!(
+            fields[COLUMNS.iter().position(|c| *c == "sent_bytes").unwrap()],
+            "512"
+        );
     }
 
     #[test]

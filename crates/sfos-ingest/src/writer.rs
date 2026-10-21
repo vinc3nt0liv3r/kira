@@ -53,11 +53,7 @@ pub async fn run(
     }
 }
 
-async fn flush(
-    store: &Store,
-    batch: &mut HashMap<Uuid, Vec<Event>>,
-    metrics: &SharedMetrics,
-) {
+async fn flush(store: &Store, batch: &mut HashMap<Uuid, Vec<Event>>, metrics: &SharedMetrics) {
     for (tenant_id, events) in batch.drain() {
         let mut attempt = 0u32;
         loop {

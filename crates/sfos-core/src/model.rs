@@ -41,8 +41,7 @@ impl CategoryGroup {
 
         // Order matters: an IPS event is a threat even though it may mention a
         // firewall rule, and a firewall authentication event is auth, not traffic.
-        if t.contains("content filtering") || t.contains("web filter") || t.contains("web proxy")
-        {
+        if t.contains("content filtering") || t.contains("web filter") || t.contains("web proxy") {
             return Self::Web;
         }
         if has(&[
@@ -64,7 +63,9 @@ impl CategoryGroup {
         if t.contains("vpn") || t.contains("ipsec") || c.contains("vpn") {
             return Self::Vpn;
         }
-        if t.contains("firewall") || t.contains("icmp") || t.contains("dos")
+        if t.contains("firewall")
+            || t.contains("icmp")
+            || t.contains("dos")
             || t.contains("mac filter")
         {
             return Self::Firewall;
@@ -157,6 +158,7 @@ pub struct Event {
     pub referer: Option<String>,
     pub user_agent: Option<String>,
     pub category: Option<String>,
+    pub category_type: Option<String>,
     pub application: Option<String>,
     pub application_category: Option<String>,
     pub application_risk: Option<i32>,

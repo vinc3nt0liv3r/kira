@@ -20,6 +20,7 @@ pub struct Config {
     pub allowed_sources: Vec<IpNet>,
     pub default_tz_offset_minutes: i32,
     pub retention_hours: i64,
+    pub keep_extended_attributes: bool,
     pub batch_size: usize,
     pub batch_ms: u64,
     pub partitions_ahead_hours: i64,
@@ -48,10 +49,21 @@ impl Config {
             allowed_sources: parse_networks(std::env::var("ALLOWED_SOURCES").ok().as_deref())?,
             default_tz_offset_minutes,
             retention_hours: env_parse("RETENTION_HOURS", 6)?.clamp(1, 168),
+            keep_extended_attributes: env_bool("KEEP_EXTENDED_ATTRIBUTES", false)?,
             batch_size: env_parse::<usize>("BATCH_SIZE", 5_000)?.clamp(1, 10_000),
             batch_ms: env_parse::<u64>("BATCH_MS", 2_000)?.clamp(50, 60_000),
             partitions_ahead_hours: env_parse("PARTITIONS_AHEAD_HOURS", 48)?.clamp(1, 168),
         })
+    }
+}
+
+fn env_bool(key: &str, default: bool) -> Result<bool> {
+    match std::env::var(key) {
+        Ok(value) if value.eq_ignore_ascii_case("true") || value == "1" => Ok(true),
+        Ok(value) if value.eq_ignore_ascii_case("false") || value == "0" => Ok(false),
+        Ok(value) => anyhow::bail!("invalid {key}={value:?}: expected true or false"),
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(err) => Err(err).with_context(|| format!("cannot read {key}")),
     }
 }
 
@@ -96,11 +108,14 @@ fn parse_tenant_map(raw: Option<&str>) -> Result<Vec<(IpNet, String)>> {
     };
     let mut out = Vec::new();
     for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        let (cidr, slug) = entry
-            .split_once('=')
-            .with_context(|| format!("TENANT_MAP entry {entry:?} must look like 192.0.2.0/24=acme"))?;
+        let (cidr, slug) = entry.split_once('=').with_context(|| {
+            format!("TENANT_MAP entry {entry:?} must look like 192.0.2.0/24=acme")
+        })?;
         let slug = slug.trim();
-        anyhow::ensure!(!slug.is_empty(), "TENANT_MAP entry {entry:?} has an empty slug");
+        anyhow::ensure!(
+            !slug.is_empty(),
+            "TENANT_MAP entry {entry:?} has an empty slug"
+        );
         out.push((
             parse_net(cidr.trim())
                 .with_context(|| format!("invalid CIDR in TENANT_MAP entry {entry:?}"))?,

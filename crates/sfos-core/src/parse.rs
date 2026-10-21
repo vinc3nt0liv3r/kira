@@ -97,10 +97,8 @@ pub fn parse_with_offset(line: &str, default_offset_minutes: i32) -> Result<Even
         src_port: int(lookup(&["src_port", "srcport"])),
         dst_port: int(lookup(&["dst_port", "dstport"])),
         protocol: lookup(&["protocol"]).map(str::to_string),
-        src_country: lookup(&["src_country_code", "src_country", "srccountry"])
-            .map(str::to_string),
-        dst_country: lookup(&["dst_country_code", "dst_country", "dstcountry"])
-            .map(str::to_string),
+        src_country: lookup(&["src_country_code", "src_country", "srccountry"]).map(str::to_string),
+        dst_country: lookup(&["dst_country_code", "dst_country", "dstcountry"]).map(str::to_string),
         src_zone: lookup(&["srczone", "src_zone"]).map(str::to_string),
         dst_zone: lookup(&["dstzone", "dst_zone"]).map(str::to_string),
 
@@ -115,17 +113,27 @@ pub fn parse_with_offset(line: &str, default_offset_minutes: i32) -> Result<Even
         referer: lookup(&["referer"]).map(str::to_string),
         user_agent: lookup(&["user_agent", "http_user_agent"]).map(str::to_string),
         category: lookup(&["category", "http_category"]).map(str::to_string),
+        category_type: lookup(&["category_type", "http_category_type"]).map(str::to_string),
         application: lookup(&["application", "app_name"]).map(str::to_string),
-        application_category: lookup(&["application_category", "app_category"])
-            .map(str::to_string),
+        application_category: lookup(&["application_category", "app_category"]).map(str::to_string),
         application_risk: int(lookup(&["application_risk", "app_risk"])),
 
         fw_rule_id: int(lookup(&["fw_rule_id", "fwrule", "rule_id"])).map(i64::from),
         fw_rule_name: lookup(&["fw_rule_name", "rule_name"]).map(str::to_string),
         policy_type: lookup(&["policy_type"]).map(str::to_string),
 
-        sent_bytes: int64(lookup(&["sent_bytes", "sentbyte", "bytes_sent", "tx_bytes"])),
-        recv_bytes: int64(lookup(&["recv_bytes", "rcvdbyte", "bytes_received", "rx_bytes"])),
+        sent_bytes: int64(lookup(&[
+            "sent_bytes",
+            "sentbyte",
+            "bytes_sent",
+            "tx_bytes",
+        ])),
+        recv_bytes: int64(lookup(&[
+            "recv_bytes",
+            "rcvdbyte",
+            "bytes_received",
+            "rx_bytes",
+        ])),
 
         threat_name: lookup(&["threat_name", "threatname"]).map(str::to_string),
         filename: lookup(&["filename"]).map(str::to_string),
@@ -140,22 +148,92 @@ pub fn parse_with_offset(line: &str, default_offset_minutes: i32) -> Result<Even
 }
 
 const KNOWN_FIELDS: &[&str] = &[
-    "device", "date", "time", "timezone", "device_id", "device_serial_id", "device_name",
-    "log_id", "log_type",
-    "log_component", "log_subtype", "con_event", "status", "priority", "severity", "src_ip",
-    "srcip", "dst_ip", "dstip",
-    "src_port", "srcport", "dst_port", "dstport", "protocol", "src_country_code", "srccountry",
-    "dst_country_code", "dstcountry", "srczone", "src_zone", "dstzone", "dst_zone", "user_name",
-    "username", "user", "user_gp", "user_group", "usergroup", "group", "domain", "url",
-    "http_method", "method", "http_status", "status_code", "mime_type", "content_type", "referer",
-    "user_agent", "http_user_agent", "category", "http_category", "application",
+    "device",
+    "date",
+    "time",
+    "timezone",
+    "device_id",
+    "device_serial_id",
+    "device_name",
+    "log_id",
+    "log_type",
+    "log_component",
+    "log_subtype",
+    "con_event",
+    "status",
+    "priority",
+    "severity",
+    "src_ip",
+    "srcip",
+    "dst_ip",
+    "dstip",
+    "src_port",
+    "srcport",
+    "dst_port",
+    "dstport",
+    "protocol",
+    "src_country_code",
+    "srccountry",
+    "dst_country_code",
+    "dstcountry",
+    "srczone",
+    "src_zone",
+    "dstzone",
+    "dst_zone",
+    "user_name",
+    "username",
+    "user",
+    "user_gp",
+    "user_group",
+    "usergroup",
+    "group",
+    "domain",
+    "url",
+    "http_method",
+    "method",
+    "http_status",
+    "status_code",
+    "mime_type",
+    "content_type",
+    "referer",
+    "user_agent",
+    "http_user_agent",
+    "category",
+    "http_category",
+    "category_type",
+    "http_category_type",
+    "application",
     "application_category",
     "application_risk",
-    "fw_rule_id", "fwrule", "rule_id", "fw_rule_name", "rule_name", "policy_type", "sent_bytes",
-    "sentbyte", "tx_bytes", "recv_bytes", "rcvdbyte", "rx_bytes", "threat_name", "threatname",
-    "filename", "reason", "message", "vpn_user", "tunnel_username", "vpn_tunnel", "tunnel_name",
-    "timestamp", "app_name", "app_category", "app_risk", "bytes_sent", "bytes_received",
-    "src_country", "dst_country",
+    "fw_rule_id",
+    "fwrule",
+    "rule_id",
+    "fw_rule_name",
+    "rule_name",
+    "policy_type",
+    "sent_bytes",
+    "sentbyte",
+    "tx_bytes",
+    "recv_bytes",
+    "rcvdbyte",
+    "rx_bytes",
+    "threat_name",
+    "threatname",
+    "filename",
+    "reason",
+    "message",
+    "vpn_user",
+    "tunnel_username",
+    "vpn_tunnel",
+    "tunnel_name",
+    "timestamp",
+    "app_name",
+    "app_category",
+    "app_risk",
+    "bytes_sent",
+    "bytes_received",
+    "src_country",
+    "dst_country",
 ];
 
 /// Drop an optional RFC3164/RFC5424 header and return the Sophos payload.
@@ -165,7 +243,10 @@ fn strip_syslog_header(line: &str) -> &str {
     let line = line.trim_start_matches('\u{feff}').trim();
     let start = if line.starts_with('<') {
         // <134> - priority value, always short.
-        line.find('>').filter(|i| *i <= 5).map(|i| i + 1).unwrap_or(0)
+        line.find('>')
+            .filter(|i| *i <= 5)
+            .map(|i| i + 1)
+            .unwrap_or(0)
     } else {
         0
     };
@@ -181,7 +262,10 @@ fn strip_syslog_header(line: &str) -> &str {
         "log_id=",
         "log_type=",
     ];
-    if PAYLOAD_PREFIXES.iter().any(|prefix| rest.starts_with(prefix)) {
+    if PAYLOAD_PREFIXES
+        .iter()
+        .any(|prefix| rest.starts_with(prefix))
+    {
         return rest.trim();
     }
 

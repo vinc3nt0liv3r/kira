@@ -3,6 +3,7 @@ use sfos_core::{parse, parse_with_offset, Action, CategoryGroup, ParseError};
 
 /// Captured SFOS 21 XGS lines (anonymized) using `<pri>device_name=... timestamp="...+0500"`.
 const SFOS21: &str = include_str!("fixtures/sfos21.log");
+const RELEASE0_SAMPLES: &str = include_str!("../../../fw1_samples.log");
 
 const FIREWALL: &str = r#"device="SFW" date=2025-04-14 time=10:30:00 timezone="UTC" device_name="XGS2100" device_id=C010012345678 log_id=010101600001 log_type="Firewall" log_component="Firewall Rule" log_subtype="Allowed" status="Allow" priority=Information duration=120 fw_rule_id=5 fw_rule_name="Allow LAN to WAN" fw_rule_section="user" policy_type=0 user_name="stefan" user_gp="" iap=0 appfilter_policy_id=0 application="" application_risk=0 application_category="" ether_type=IPv4 (0x0800) in_interface="Port2" src_mac=00:0c:29:ab:cd:ef src_ip=192.168.1.50 src_country_code=R1 dst_ip=8.8.8.8 dst_country_code=USA protocol="TCP" src_port=54321 dst_port=443 sent_pkts=15 recv_pkts=12 sent_bytes=2048 recv_bytes=4096 srczone="LAN" dstzone="WAN" connid="1234567890" message="" app_category="general-internet""#;
 
@@ -25,8 +26,14 @@ fn parses_firewall_traffic() {
     assert_eq!(ev.src_zone.as_deref(), Some("LAN"));
     assert_eq!(ev.ts, Utc.with_ymd_and_hms(2025, 4, 14, 10, 30, 0).unwrap());
     // A bare value with a space must not swallow the next field.
-    assert_eq!(ev.attrs.get("ether_type").map(String::as_str), Some("IPv4 (0x0800)"));
-    assert_eq!(ev.attrs.get("connid").map(String::as_str), Some("1234567890"));
+    assert_eq!(
+        ev.attrs.get("ether_type").map(String::as_str),
+        Some("IPv4 (0x0800)")
+    );
+    assert_eq!(
+        ev.attrs.get("connid").map(String::as_str),
+        Some("1234567890")
+    );
     // Fields modeled as columns are not duplicated into attrs.
     assert!(!ev.attrs.contains_key("src_ip"));
     assert!(!ev.attrs.contains_key("date"));
@@ -45,7 +52,8 @@ fn parses_blocked_web_request_and_keeps_url_query() {
     );
     assert_eq!(ev.http_method.as_deref(), Some("GET"));
     assert_eq!(ev.http_status, Some(403));
-    assert_eq!(ev.attrs.get("category_type").map(String::as_str), Some("Unproductive"));
+    assert_eq!(ev.category_type.as_deref(), Some("Unproductive"));
+    assert!(!ev.attrs.contains_key("category_type"));
 }
 
 #[test]
@@ -77,7 +85,10 @@ fn classifies_vpn_and_authentication_events() {
 #[test]
 fn strips_rfc3164_and_rfc5424_headers() {
     let rfc3164 = format!("<134>Apr 14 10:30:00 XGS2100 SFOS: {FIREWALL}");
-    assert_eq!(parse(&rfc3164).unwrap().log_id.as_deref(), Some("010101600001"));
+    assert_eq!(
+        parse(&rfc3164).unwrap().log_id.as_deref(),
+        Some("010101600001")
+    );
 
     let rfc5424 = format!("<134>1 2025-04-14T10:30:00.123Z xgs2100 sfos - - - {WEB_BLOCKED}");
     let ev = parse(&rfc5424).unwrap();
@@ -109,14 +120,20 @@ fn unescapes_quoted_values() {
 
 #[test]
 fn parses_sfos21_iso_timestamps_and_byte_fields() {
-    let lines: Vec<&str> = SFOS21.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = SFOS21
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     assert_eq!(lines.len(), 7);
     for line in &lines {
         parse(line).expect("every captured SFOS 21 line must parse");
     }
 
     let start = parse(lines[0]).unwrap();
-    assert_eq!(start.ts, Utc.with_ymd_and_hms(2026, 10, 3, 10, 45, 28).unwrap());
+    assert_eq!(
+        start.ts,
+        Utc.with_ymd_and_hms(2026, 10, 3, 10, 45, 28).unwrap()
+    );
     assert_eq!(start.device_name.as_deref(), Some("X33010KMQVXTJ26"));
     // SFOS 21 logs the serial as device_serial_id; the dashboard needs it as device_id.
     assert_eq!(start.device_id.as_deref(), Some("X33010KMQVXTJ26"));
@@ -141,11 +158,20 @@ fn parses_sfos21_iso_timestamps_and_byte_fields() {
         .find(|event| event.category.is_some())
         .expect("a content filtering line");
     assert_eq!(web.category_group, CategoryGroup::Web);
+    assert_eq!(web.action, Some(Action::Allowed));
     assert!(web.url.as_deref().unwrap_or_default().starts_with("http"));
     assert!(web.sent_bytes.is_some());
     assert_eq!(web.category.as_deref(), Some("Information Technology"));
-    assert!(web.user_agent.is_some());
+    assert_eq!(web.category_type.as_deref(), Some("Acceptable"));
+    assert!(web
+        .user_agent
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with("Mozilla/5.0"));
     assert!(!web.attrs.contains_key("http_user_agent"));
+    assert!(!web.attrs.contains_key("user_agent"));
+    assert!(!web.attrs.contains_key("http_category"));
+    assert!(!web.attrs.contains_key("http_category_type"));
 
     let web_category = lines
         .iter()
@@ -153,7 +179,10 @@ fn parses_sfos21_iso_timestamps_and_byte_fields() {
         .find(|event| event.category.as_deref() == Some("Software Updates"))
         .expect("an SFOS 21 HTTP category");
     assert_eq!(web_category.category.as_deref(), Some("Software Updates"));
+    assert_eq!(web_category.category_type.as_deref(), Some("Acceptable"));
+    assert_eq!(web_category.action, Some(Action::Blocked));
     assert!(!web_category.attrs.contains_key("http_category"));
+    assert!(!web_category.attrs.contains_key("http_category_type"));
 
     let app = lines
         .iter()
@@ -200,4 +229,35 @@ fn rejects_non_sophos_and_incomplete_lines() {
             .unwrap_err(),
         ParseError::NotSophos(_)
     ));
+}
+
+#[test]
+fn parses_release0_samples_across_report_groups() {
+    let mut groups = std::collections::BTreeMap::new();
+    let mut events = Vec::new();
+    for line in RELEASE0_SAMPLES
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+    {
+        let event = parse(line).expect("every Release 0 sample must parse");
+        *groups.entry(event.category_group.as_str()).or_insert(0) += 1;
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 9);
+    assert_eq!(
+        groups,
+        std::collections::BTreeMap::from(
+            [("auth", 1), ("firewall", 4), ("threat", 1), ("web", 3),]
+        )
+    );
+    assert!(events
+        .iter()
+        .any(|event| event.application.as_deref() == Some("Windows Update")));
+    assert!(events
+        .iter()
+        .any(|event| event.threat_name.as_deref() == Some("EICAR-Test-File")));
+    assert!(events
+        .iter()
+        .any(|event| event.user_name.as_deref() == Some("release0-admin")));
 }

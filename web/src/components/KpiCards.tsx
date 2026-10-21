@@ -27,9 +27,9 @@ export function KpiCards({ totals, loading }: { totals: Totals | null; loading: 
   const identified = totals.allowed + totals.blocked;
   const kpis: Kpi[] = [
     {
-      label: "Users / hosts",
+      label: "Unique identities",
       value: fmtNumber(totals.users),
-      hint: totals.users > 0 ? "active in range" : "no usernames or source IPs logged",
+      hint: totals.users > 0 ? "usernames or fallback source IPs" : "no usernames or source IPs logged",
       accent: "bg-sky-400",
     },
     {

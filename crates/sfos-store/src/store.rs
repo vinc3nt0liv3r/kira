@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
+use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use futures_util::SinkExt;
 use sfos_core::Event;
@@ -19,6 +19,22 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0004_event_rollups",
         include_str!("../migrations/0004_event_rollups.sql"),
+    ),
+    (
+        "0005_empty_rollups_ready",
+        include_str!("../migrations/0005_empty_rollups_ready.sql"),
+    ),
+    (
+        "0006_http_category_type",
+        include_str!("../migrations/0006_http_category_type.sql"),
+    ),
+    (
+        "0007_device_activity",
+        include_str!("../migrations/0007_device_activity.sql"),
+    ),
+    (
+        "0008_global_retention",
+        include_str!("../migrations/0008_global_retention.sql"),
     ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
@@ -47,7 +63,19 @@ impl Store {
         password: Option<&str>,
         max_size: usize,
     ) -> Result<Self> {
-        let pg_config = connection_config(database_url, password)?;
+        Self::connect_with_password_and_options(database_url, password, max_size, None)
+    }
+
+    pub fn connect_with_password_and_options(
+        database_url: &str,
+        password: Option<&str>,
+        max_size: usize,
+        options: Option<&str>,
+    ) -> Result<Self> {
+        let mut pg_config = connection_config(database_url, password)?;
+        if let Some(options) = options {
+            pg_config.options(options);
+        }
         let manager = Manager::from_config(
             pg_config,
             NoTls,
@@ -113,6 +141,97 @@ impl Store {
             .execute("SELECT pg_advisory_unlock($1)", &[&MIGRATION_LOCK])
             .await;
         result
+    }
+
+    pub async fn initialize_global_retention(&self, retention_hours: i64) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "INSERT INTO global_retention (singleton, retention_hours)
+                 VALUES (true, $1)
+                 ON CONFLICT (singleton) DO NOTHING",
+                &[&(retention_hours.clamp(1, 168) as i32)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn global_retention_hours(&self) -> Result<i64> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "SELECT retention_hours FROM global_retention WHERE singleton",
+                &[],
+            )
+            .await?;
+        Ok(i64::from(row.get::<_, i32>(0)))
+    }
+
+    pub async fn set_global_retention_hours(&self, retention_hours: i64) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE global_retention
+                 SET retention_hours = $1, updated_at = now()
+                 WHERE singleton",
+                &[&(retention_hours as i32)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn retention_storage_estimate(&self) -> Result<(i64, i64, Option<i64>)> {
+        let client = self.pool.get().await?;
+        let database_bytes: i64 = client
+            .query_one("SELECT pg_database_size(current_database())::bigint", &[])
+            .await?
+            .get(0);
+        let now = Utc::now();
+        let rows = client
+            .query(
+                "SELECT c.relname, c.reltuples, pg_total_relation_size(c.oid)::bigint
+                 FROM pg_inherits i
+                 JOIN pg_class p ON p.oid = i.inhparent
+                 JOIN pg_class c ON c.oid = i.inhrelid
+                 WHERE p.relname = 'events'
+                   AND p.relnamespace = 'public'::regnamespace
+                   AND c.relname ~ '^events_[0-9]{10}$'",
+                &[],
+            )
+            .await?;
+        let mut current_raw_bytes = 0i64;
+        let mut recent_bytes = 0i64;
+        let mut first_observed_hour = None;
+        let estimate_cutoff = now - chrono::Duration::hours(168);
+        for row in rows {
+            let name: String = row.get(0);
+            let Some(start) = hourly_partition_start(&name) else {
+                continue;
+            };
+            let end = start + chrono::Duration::hours(1);
+            let partition_bytes: i64 = row.get(2);
+            if start <= now {
+                current_raw_bytes += partition_bytes;
+            }
+            if end <= estimate_cutoff || start > now {
+                continue;
+            }
+            let partition_rows = f64::from(row.get::<_, f32>(1)).max(0.0);
+            if partition_rows > 0.0 {
+                recent_bytes += partition_bytes;
+                first_observed_hour = Some(
+                    first_observed_hour.map_or(start, |first: DateTime<Utc>| first.min(start)),
+                );
+            }
+        }
+        let bytes_per_hour = first_observed_hour.map(|first| {
+            let observed_hours = ((now - first).num_hours() + 1).clamp(1, 168) as f64;
+            (recent_bytes as f64 / observed_hours)
+                .max(0.0)
+                .round()
+                .min(i64::MAX as f64) as i64
+        });
+        Ok((database_bytes, current_raw_bytes, bytes_per_hour))
     }
 
     pub async fn list_tenants(&self) -> Result<Vec<Tenant>> {
@@ -220,6 +339,7 @@ impl Store {
         )
         .await?;
         tx.execute(Self::ROLLUP_BATCH_SQL, &[]).await?;
+        tx.execute(Self::DEVICE_ACTIVITY_BATCH_SQL, &[]).await?;
         tx.commit().await?;
         tracing::debug!(
             rows = copied,
@@ -303,6 +423,33 @@ impl Store {
         bytes_down = event_rollups.bytes_down + EXCLUDED.bytes_down
     "#;
 
+    const DEVICE_ACTIVITY_BATCH_SQL: &str = r#"
+    INSERT INTO device_activity (
+        tenant_id, bucket, device_key, name, device_id, model, firmware, last_seen, events
+    )
+    SELECT tenant_id,
+           date_trunc('minute', ts) AS bucket,
+           COALESCE(NULLIF(device_id, ''), NULLIF(device_name, ''), 'unknown') AS device_key,
+           COALESCE(NULLIF(device_name, ''), NULLIF(device_id, ''), 'unknown') AS name,
+           NULLIF(device_id, ''),
+           max(attrs->>'device_model'),
+           max(attrs->>'firmware_version'),
+           max(ts),
+           count(*)::bigint
+    FROM event_batch
+    GROUP BY tenant_id, date_trunc('minute', ts),
+             COALESCE(NULLIF(device_id, ''), NULLIF(device_name, ''), 'unknown'),
+             COALESCE(NULLIF(device_name, ''), NULLIF(device_id, ''), 'unknown'),
+             NULLIF(device_id, '')
+    ON CONFLICT (tenant_id, bucket, device_key) DO UPDATE SET
+        name = EXCLUDED.name,
+        device_id = COALESCE(EXCLUDED.device_id, device_activity.device_id),
+        model = COALESCE(EXCLUDED.model, device_activity.model),
+        firmware = COALESCE(EXCLUDED.firmware, device_activity.firmware),
+        last_seen = GREATEST(device_activity.last_seen, EXCLUDED.last_seen),
+        events = device_activity.events + EXCLUDED.events
+    "#;
+
     /// Create hourly partitions covering the previous hour through the requested horizon.
     pub async fn ensure_partitions(&self, hours_ahead: i64) -> Result<u64> {
         let client = self.pool.get().await?;
@@ -378,7 +525,7 @@ impl Store {
             let Some(suffix) = name.strip_prefix("events_") else {
                 continue;
             };
-            let Ok(start) = NaiveDateTime::parse_from_str(suffix, "%Y%m%d%H") else {
+            let Some(start) = hourly_partition_start(&name) else {
                 if suffix.len() == 8 && suffix.bytes().all(|b| b.is_ascii_digit()) {
                     anyhow::bail!(
                         "daily event partition {name} is present; run scripts/migrate-hourly-retention.sh before enabling hourly retention"
@@ -386,7 +533,6 @@ impl Store {
                 }
                 continue;
             };
-            let start = start.and_utc();
             let end = start + chrono::Duration::hours(1);
             if end > cutoff {
                 continue;
@@ -395,10 +541,7 @@ impl Store {
                 continue;
             }
             client
-                .execute(
-                    "SELECT sfos_refresh_rollups($1, $2)",
-                    &[&start, &end],
-                )
+                .execute("SELECT sfos_refresh_rollups($1, $2)", &[&start, &end])
                 .await?;
             client
                 .batch_execute(&format!("DROP TABLE IF EXISTS \"{name}\""))
@@ -407,6 +550,18 @@ impl Store {
             dropped += 1;
         }
         Ok(dropped)
+    }
+
+    pub async fn drop_old_device_activity(&self) -> Result<u64> {
+        let client = self.pool.get().await?;
+        let deleted = client
+            .execute(
+                "DELETE FROM device_activity
+                 WHERE bucket < date_trunc('minute', now()) - interval '10 minutes'",
+                &[],
+            )
+            .await?;
+        Ok(deleted)
     }
 
     pub async fn last_event_at(&self, tenant_id: Uuid) -> Result<Option<DateTime<Utc>>> {
@@ -428,6 +583,16 @@ impl Store {
     }
 }
 
+fn hourly_partition_start(name: &str) -> Option<DateTime<Utc>> {
+    let suffix = name.strip_prefix("events_")?;
+    if suffix.len() != 10 || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let date = NaiveDate::parse_from_str(&suffix[..8], "%Y%m%d").ok()?;
+    let hour = suffix[8..].parse::<u32>().ok()?;
+    date.and_hms_opt(hour, 0, 0).map(|start| start.and_utc())
+}
+
 fn connection_config(database_url: &str, password: Option<&str>) -> Result<tokio_postgres::Config> {
     let mut config: tokio_postgres::Config =
         database_url.parse().context("invalid DATABASE_URL")?;
@@ -440,6 +605,7 @@ fn connection_config(database_url: &str, password: Option<&str>) -> Result<tokio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn connection_password_override_accepts_url_reserved_characters() {
@@ -448,10 +614,17 @@ mod tests {
             Some("contains@reserved:characters"),
         )
         .unwrap();
-        let mut expected: tokio_postgres::Config =
-            "postgres://sfos@db:5432/sfos".parse().unwrap();
+        let mut expected: tokio_postgres::Config = "postgres://sfos@db:5432/sfos".parse().unwrap();
         expected.password("contains@reserved:characters");
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn parses_hourly_partition_names_into_utc_boundaries() {
+        let expected = Utc.with_ymd_and_hms(2026, 10, 21, 7, 0, 0).unwrap();
+        assert_eq!(hourly_partition_start("events_2026102107"), Some(expected));
+        assert_eq!(hourly_partition_start("events_default"), None);
+        assert_eq!(hourly_partition_start("events_20261021"), None);
     }
 }
 

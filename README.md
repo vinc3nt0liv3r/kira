@@ -137,7 +137,9 @@ device uses one that is not recognised, set `DEFAULT_TZ_OFFSET_MINUTES` to that 
 - **`crates/sfos-store`** — embedded SQL migrations, tenant helpers, partition management and the
   batched `COPY` writer.
 - **`crates/sfos-ingest`** — UDP/TCP listeners, per-source tenant routing, bounded queue, batch
-  writer with retries, partition maintenance and a metrics endpoint.
+  writer with retries, partition maintenance and a metrics endpoint. `/metrics` reports current
+  queue depth/capacity/utilization, high-water depth, queued/written totals, database write errors,
+  rejected lines and dropped events.
 - **`crates/sfos-api`** — Axum JSON API, static dashboard hosting, gzip, health endpoint.
 - **`web/`** — React 19 + TypeScript + Tailwind 4 + Recharts.
 
@@ -158,9 +160,33 @@ footprint, retained event count, approximate ingestion rate, storage per event, 
 event storage and largest daily partitions. The event count requires a sequential scan and may
 take time on a large database; the script is read-only and has a 120-second statement timeout.
 Use `docker system df -v` to see Docker volume, image and build-cache usage separately.
-Run `scripts/verify-samples.py --yes` against an isolated test stack to replay the anonymized
-captured samples over syslog and check the rows returned by the API. It refuses to replay when
-matching sample rows already exist in its fixture time window.
+Run `scripts/verify-release0.sh` for an isolated clean-install test. It starts a separate Compose
+project bound to loopback-only test ports, replays the seven anonymized captured samples plus two
+clearly labeled synthetic threat/authentication events, checks raw API rows and hourly dashboard
+aggregates, measures a deterministic load, restores a backup into a scratch database, and removes
+the test volume. The replay rebases sample timestamps to the current time so the configured
+six-hour raw window does not hide them. Use `--keep` to retain the isolated stack for browser
+inspection; remove it with the command printed at completion.
+
+API database statements have a 10-second timeout by default (`API_STATEMENT_TIMEOUT_MS`, configurable
+from 1 to 120000 ms). Overview/top/event-search requests are limited to at most two concurrent
+analytical requests, leaving spare pool capacity for health and metadata calls under the default
+pool size. A busy API returns HTTP 503 rather than queuing unlimited expensive work. Query timeouts
+also return HTTP 503. Fresh empty databases mark
+their rollups ready automatically; populated databases are not marked ready without a verified
+backfill, and startup logs a warning when dashboard aggregates may still use raw events. The
+`/events?q=` filter remains substring search; timeouts and concurrency limits bound its impact but
+do not replace a measured search index.
+
+The repeatable benchmark sends 10,001 synthetic events: 7,000 web, 2,000 firewall, 500 threat,
+300 authentication, 200 VPN, and one relayed firewall event. It uses the default 5,000-event /
+2-second batching configuration and reports persistence throughput plus partition storage growth
+including indexes. On the documented 4-vCPU, 7.8-GiB host, one isolated run persisted all 10,001
+events in 3.317 seconds (3,015 events/second), with 5,373,952 bytes of partition growth including
+indexes (537.3 bytes/event), a 5,001-event queue high-water mark against 20,000 capacity, and no
+drops or database write errors. This is a single controlled run, not a sustained-capacity guarantee.
+Record the emitted JSON together with the hardware and actual Compose configuration when refreshing
+capacity measurements.
 
 On 2026-10-20, an observed database snapshot contained 1,515,841 events received over 43 minutes.
 The database occupied 1.74 GB and its Docker volume 2.65 GB, including 688 MB of WAL. The largest
@@ -227,31 +253,38 @@ zero event rows. PostgreSQL reduced relation storage to about 30 MB but retained
 reusable WAL segments near its configured 1 GB `max_wal_size`. WAL is not retained event data and
 is reused by PostgreSQL; never delete files from `pg_wal` manually.
 
-Every accepted syslog line is stored as an event row, including unmodeled fields in JSONB `attrs`.
-Storage varies substantially with log mix: the historical sample used about 1.2 KB/event while
+Every accepted syslog line is stored as an event row. By default, unmodeled fields in JSONB `attrs`
+are discarded except `device_model` and `firmware_version`, which feed the device summary. Set
+`KEEP_EXTENDED_ATTRIBUTES=true` to retain every unmodeled Sophos field; this increases storage and
+may retain vendor data not used by reports. Storage varies substantially with log mix: the historical sample used about 1.2 KB/event while
 the controlled replay used about 536 bytes/event. At the historical sample size, a 14 GB event
 database would represent roughly 12 million events. Size requirements depend on actual log rate
 and fields; measure the deployment before choosing retention.
 
 In the live sample, `attrs` averaged about 794 bytes in sampled rows. It contains vendor fields
 that are not modeled as report columns (such as interfaces, MAC addresses, and rule/application
-metadata); it is not a second copy of every normalized field. A couple of aliases were being kept
-there despite also being normalized (`device_serial_id` and `http_user_agent`); new ingestion now
-maps/omits those duplicates. That small correction does not shrink existing rows. A larger storage
-reduction requires deciding which unmodeled attributes are needed: an allowlist or configurable
-compact mode can save space, but permanently discards fields outside the chosen set. Prefer a
-short raw-event window plus long-lived rollups over silently deleting fields or attempting to
-compress indexes/rows blindly.
+metadata); it is not a second copy of every normalized field. New compact ingestion reduces new
+row size but does not rewrite existing rows.
 
 Dashboard identities now use the source IP when a log has no username, and the top-destinations
 panel includes both website domains and application names. The parser also maps `http_user_agent`
 to its typed field and no longer retains `device_serial_id` a second time in `attrs`.
 
-Raw event rows are retained for `RETENTION_HOURS` (default 6, with up to one extra hour at hourly
-partition boundaries). The collector refreshes each expiring hour's rollups before dropping that
-raw partition. Overview and top-dimension reports use hourly rollups across the full selected
-range; event detail search is limited to retained raw rows. Rollup refresh and raw-partition
-removal are separate, repeatable operations so a failed refresh cannot discard its source partition.
+Raw event rows use a global retention window (default 6 hours, with up to one extra hour at hourly
+partition boundaries). It is editable in the dashboard using a server-configured bearer token; it
+is not a per-site setting. Before applying a choice, the dashboard shows the current database size
+and approximate projected sizes based on recent PostgreSQL partition statistics. The estimate is
+not a capacity guarantee. The collector applies a saved change during maintenance within about five
+minutes. The collector refreshes each expiring hour's rollups before dropping that raw partition.
+Overview and top-dimension reports use hourly rollups across the full selected range; event detail
+search is limited to retained raw rows. Rollup refresh and raw-partition removal are separate,
+repeatable operations so a failed refresh cannot discard its source partition.
+
+Rollups are retained independently from raw-event details, so trend summaries survive detail
+expiry. The catch-all `events_default` partition is not dropped by hourly retention and should be
+monitored if logs can arrive with timestamps outside the pre-created partition range. Optional
+compressed event-level exports are deferred: they require additional archive storage and a separate
+restore workflow; database backup and restore procedures remain the supported recovery path.
 
 ### Upgrade an existing daily-partition database
 
@@ -317,8 +350,10 @@ scripts/reset-data.sh    delete all events, or only synthetic DEMO-* events
 scripts/seed-demo.py     realistic demo syslog generator (opt-in, tagged DEMO-)
 scripts/smoke-test.py    end-to-end API/dashboard smoke test
 scripts/diagnose-storage.sh  read-only database size and ingestion-rate report
-scripts/verify-samples.py  replay captured events and verify persisted API results
-scripts/verify-backup-restore.sh  scratch-database backup/restore verification
+scripts/verify-samples.py  replay Release 0 samples and verify API/rollup/metrics results
+scripts/benchmark-release0.py  deterministic storage and ingestion benchmark
+scripts/verify-backup-restore.sh  scratch-database raw/rollup backup-restore verification
+scripts/verify-release0.sh  isolated clean-install Release 0 verification
 docker-compose.yml       Postgres + API + collector
 Dockerfile               multi-stage build
 ```
@@ -350,7 +385,8 @@ Dockerfile               multi-stage build
 | `TENANT_MAP` | *(empty)* | `CIDR=slug,...` routing, longest prefix wins |
 | `ALLOWED_SOURCES` | *(empty)* | Only accept logs from these IPs/CIDRs |
 | `DEFAULT_TZ_OFFSET_MINUTES` | `0` | Fallback for unknown timezone abbreviations |
-| `RETENTION_HOURS` | `6` | Raw searchable-event window; hourly partitions are rolled up before removal |
+| `RETENTION_HOURS` | `6` | Initial global raw retention for a new database; saved setting wins afterward |
+| `KEEP_EXTENDED_ATTRIBUTES` | `false` | Keep all unmodeled event attributes instead of only device model/firmware |
 | `BATCH_SIZE` | `5000` | Rows per COPY batch |
 | `BATCH_MS` | `2000` | Max time before flushing a partial batch |
 | `DB_POOL_SIZE` | `8` | Postgres connections |
@@ -367,15 +403,19 @@ Dockerfile               multi-stage build
 | `WEB_DIR` | `web/dist` | Built dashboard assets |
 | `TENANT_SLUG` | `default` | Default site for API requests |
 | `TENANT_NAME` | `Default site` | Created on first boot if missing |
-| `RETENTION_HOURS` | `6` | Raw event detail window shown and enforced by the API |
+| `RETENTION_HOURS` | `6` | Initial global raw retention for a new database; saved setting wins afterward |
+| `RETENTION_ADMIN_TOKEN` | *(unset)* | Optional bearer token (minimum 32 characters) enabling dashboard retention changes |
 | `DB_POOL_SIZE` | `8` | Postgres connections |
+| `API_STATEMENT_TIMEOUT_MS` | `10000` | PostgreSQL statement timeout for API connections |
 
 ### Security
 
-There is **no login** in v1. Run the dashboard on a trusted management network, or put it behind a
-reverse proxy that terminates TLS and enforces authentication (basic auth, OIDC, VPN). Do not
-publish the dashboard port to the internet. The syslog port has no authentication either — use
-`ALLOWED_SOURCES` to restrict which addresses may submit logs.
+There is **no general dashboard login** in v1. Run the dashboard on a trusted management network,
+or put it behind a reverse proxy that terminates TLS and enforces authentication (basic auth, OIDC,
+VPN). Do not publish the dashboard port to the internet. The optional retention control uses the
+server-side `RETENTION_ADMIN_TOKEN`; the bearer secret is entered only when applying a change and
+is not saved in browser storage. Without the token, preview is read-only. The syslog port has no
+authentication either — use `ALLOWED_SOURCES` to restrict which addresses may submit logs.
 
 ---
 
@@ -390,7 +430,11 @@ RFC3339 (`2026-04-14T00:00:00Z`), epoch seconds, or relative windows (`1h`, `24h
 | `GET /api/v1/meta` | Tenants, active site, devices seen in 24 h, last event |
 | `GET /api/v1/overview` | Totals + gap-filled timeseries |
 | `GET /api/v1/top?dimension=users` | Ranked top-N: `users`, `domains`, `categories`, `policies`, `threats`, `applications`, `countries`, `devices`, `log_types` |
-| `GET /api/v1/events` | Newest events with `q`, `action`, `group`, `limit`, `offset` |
+| `GET /api/v1/events` | Newest events with `q` (including category), `action`, `group`, `limit`, `offset` |
+| `GET /api/v1/retention` | Global detail-retention setting and approximate storage preview |
+| `PUT /api/v1/retention` | Change global detail retention; requires `Authorization: Bearer <RETENTION_ADMIN_TOKEN>` |
+| `GET /api/v1/retention` | Global detail-retention setting and approximate storage preview |
+| `PUT /api/v1/retention` | Change global detail retention; requires `Authorization: Bearer <RETENTION_ADMIN_TOKEN>` |
 
 ```bash
 curl -s 'http://localhost:8080/api/v1/overview?from=24h' | jq .totals
@@ -408,16 +452,23 @@ is counted once. `events` still returns every raw log line, including the start 
 ### Data model
 
 - `tenants` — slug, name, default flag, `retention_days` (reserved for per-tenant retention).
+- `global_retention` — persisted global raw-event detail retention setting.
 - `events` — one row per accepted syslog message, partitioned by hour on `ts`, primary key
-  `(ts, id)`. Includes normalized columns for user, domain, URL, category, application, rule,
-  bytes, threat, IPs, zones, ports and `con_event`, plus `attrs jsonb` with every unmodeled SFOS
-  field.
+  `(ts, id)`. Includes normalized columns for user, domain, URL, HTTP category and category type,
+  application, rule, bytes, threat, IPs, zones, ports and `con_event`, plus `attrs jsonb` with
+  unmodeled SFOS fields when `KEEP_EXTENDED_ATTRIBUTES=true`; otherwise only `device_model` and
+  `firmware_version` are kept in `attrs`. `http_category` / `category` and
+  `http_category_type` / `category_type` are normalized to the same respective columns. The API
+  reads legacy category-type values from `attrs` when older rows have not yet been normalized;
+  startup does not run a large backfill.
 - `events_default` — catch-all partition for timestamps outside the pre-created hours.
 - `event_rollups` — compact hourly overview and dimension totals for users/hosts, domains,
   destinations, categories, policies, threats, applications, countries, and devices.
+- `device_activity` — short-lived per-minute device counts and last-seen/model metadata used by
+  the dashboard's recent-firewall list without aggregating raw events on each refresh.
 - Indexes: `(tenant_id, ts)`, `(tenant_id, category_group, ts)` and `(tenant_id, user_name, ts)`.
 
-Retention refreshes rollups and drops complete hourly partitions older than `RETENTION_HOURS`.
+Retention refreshes rollups and drops complete hourly partitions older than the global retention setting.
 Hourly granularity means raw data can remain for up to one extra hour beyond the configured window.
 
 ---
@@ -463,13 +514,15 @@ scripts/reset-data.sh --demo-only
 
 The seed generator emits deterministic, realistic SFOS lines and prints the totals the dashboard
 should show. `scripts/smoke-test.py` turns that into assertions against a running stack.
-`scripts/verify-samples.py --yes` replays the anonymized captured lines in `fw1_samples.log`
-through the actual TCP collector and checks that all expected log types and web categories appear
-in the event API.
+`scripts/verify-release0.sh` runs the sample replay, benchmark, and scratch restore against a
+disposable Compose project rather than the running production database. `scripts/verify-samples.py`
+rebases the fixture timestamps and verifies persisted event groups and fields, overview totals, top
+categories/applications/threats, dashboard bundle delivery, and queue/write-loss metrics.
 
 ### Verification performed for v1
 
-- `cargo test --workspace --locked`: 20 tests covering quoted/escaped/bare values, RFC3164 and RFC5424
+- `cargo test --workspace --locked`: all 23 unit and integration tests passed, covering API range and
+  bucket behavior, parser and ingestion metrics, quoted/escaped/bare values, RFC3164 and RFC5424
   framing, classic and SFOS 21 timestamps, real captured XGS lines (fixture at
   `crates/sfos-core/tests/fixtures/sfos21.log`), timezone handling, threat/auth/VPN
   classification, COPY escaping and arity, time-range validation, bucket selection, gap filling
@@ -479,17 +532,17 @@ in the event API.
 - Real capture replay: all 7 lines in `fw1_samples.log` parsed; Start/Stop de-duplication produced
   2 allowed / 4 blocked connections, 3 web requests, 5 users, 14,228 bytes down and 2,083 bytes
   up, with the 14-day-old timestamps landing in the DEFAULT partition as designed.
-- Release 0 replay: `scripts/verify-samples.py --yes` verified all 7 anonymized captured lines
-  through TCP ingestion, PostgreSQL storage, and the API, including the SFOS `http_category`
-  values `Information Technology` and `Software Updates`.
-- Release 0 backup verification: `scripts/verify-backup-restore.sh` restored all 1,515,841 old
-  events into a scratch database and verified the row count before the old event rows were cleared.
-- Controlled benchmark: 10,001 generated events; 536 bytes/event including current-day indexes;
-  966 events/second across the receive window; no drops or database errors. API medians:
-  overview 67 ms, top categories 20 ms, event list 5 ms.
-- `cargo test --workspace --locked`: 20 Rust tests passed after the Release 0 parser correction.
-- Dashboard rendered in Chromium with no console errors: search filtered rows to the matching
-  user, row details expanded, bandwidth toggle worked, pause/resume worked, no horizontal overflow.
+- Release 0 replay: `scripts/verify-samples.py --yes` replayed the seven anonymized captured
+  examples plus synthetic threat and authentication cases through TCP ingestion, PostgreSQL,
+  rollups and API checks. All expected log types/groups, categories, application and threat
+  rankings, authentication identity, and queue/write-loss metrics matched.
+- Release 0 backup verification: the isolated run restored all 10,010 rows into a scratch
+  database and verified raw rows, tenants, migrations, rollup rows, summarized event totals, and
+  the readiness marker. The compressed backup was 596 KiB.
+- Controlled benchmark: 10,001 generated events; 537.3 bytes/event including indexes; 3,015
+  events/second; queue high-water 5,001/20,000; no drops or database write errors.
+- Dashboard rendered in Chromium with the replay data visible, including the Windows Update
+  application, EICAR threat and authentication row; no page errors or horizontal overflow.
 
 ---
 
@@ -512,20 +565,58 @@ sending logs. The collector accepts any source by default when the allow-list is
 
 ## Roadmap
 
-### Release 0 — Make the baseline trustworthy (completed 2026-10-20)
+### Release 0 — Make the baseline trustworthy (completed 2026-10-21)
 
-- [x] Keep anonymized, representative Sophos samples in `fw1_samples.log` and
-  `crates/sfos-core/tests/fixtures/sfos21.log`.
-- [x] Verify the captured sample lines from TCP ingestion through PostgreSQL and API output with
-  `scripts/verify-samples.py --yes`; expected log types and web categories match.
-- [x] Document backup/restore and verify a custom-format backup in a scratch database with
-  `scripts/verify-backup-restore.sh`; event, tenant, and migration counts matched.
-- [x] Measure storage/event, ingestion rate, and API latency on the documented 4-vCPU test host.
-- [x] Clear the previous event set after the backup/restore check; the database now has zero event
-  rows, with schema and default tenant retained.
+- [x] Keep seven anonymized captured examples covering firewall, web, and application events plus
+  synthetic threat/authentication examples; parser tests exercise every sample group.
+- [x] Replay the samples with current timestamps through TCP ingestion and verify raw API rows,
+  hourly totals, categories, application/threat rankings, authentication identity, and dashboard
+  assets on a clean isolated install.
+- [x] Verify the restored database matches raw-event counts, tenant/migration counts, rollup row
+  counts, summarized event totals, and the rollup readiness marker.
+- [x] Measure storage/event and persistence throughput with a fixed 10,001-event workload,
+  documented hardware, batch configuration, and zero dropped events/database write errors.
+- [x] Expose live queue depth, capacity, utilization, and high-water mark alongside cumulative
+  queued/written/error/drop counters.
 
-**Exit gate met:** all captured events produced the expected persisted API values, and backup
-restore was verified. Measurements are a reference for this test host, not a scale guarantee.
+**Exit gate met:** the isolated clean install and replay produce the expected API values and visible
+dashboard entries, and the upgraded-schema backup restores with raw and rollup state matching.
+Capacity figures are specific to the documented test hardware and workload, not a scale guarantee.
+
+### Release 1 — Correct Sophos data (completed 2026-10-21)
+
+- [x] Normalize `http_category` into `category`, and preserve `http_category_type` in
+  `category_type`; expose the type in event API responses and expanded dashboard rows.
+- [x] Verify known HTTP user-agent aliases normalize to `user_agent` without duplicating them in
+  `attrs`; retain only report/search-relevant fields as normalized columns.
+- [x] Test allowed and denied category captures, including category values, category type, action,
+  and preservation of the normalized user-agent.
+- [x] Verify categories, actions, category types, and category summary results through the API;
+  verify category and type are visible in the dashboard event explorer.
+
+**Exit gate:** the captured allowed and denied samples show their expected category and action in
+the event explorer, and both appear in the category summary. The isolated replay confirmed
+Information Technology / allowed and Software Updates / blocked, each with category type
+Acceptable, in the API response, category summary, and rendered dashboard.
+
+### Release 2 — Storage controls and retention (implementation in progress)
+
+- [x] Default to compact event attributes; retain only device model and firmware outside typed
+  report fields. Set `KEEP_EXTENDED_ATTRIBUTES=true` to opt back into retaining every extra field.
+- [x] Persist one **global** retention period shared by API and collector; initialize it from
+  `RETENTION_HOURS` only when no saved value exists.
+- [x] Add the bearer-token protected retention update, explicit period choices, database-size
+  preview, and approximate partition-statistics-based storage projections in the dashboard.
+- [x] Continue refreshing hourly rollups before raw partition removal; these rollups outlive raw
+  details. Document that catch-all partition data is not dropped and that compressed exports are
+  deferred due to extra storage and restore complexity.
+- [x] Pass the isolated retention API/auth/storage-preview test and verify that saved settings
+  survive API and collector restart.
+- [ ] Verify that expired partitions are removed while their summary rollups remain.
+
+**Exit gate pending:** the isolated API test validates estimates, auth, saved settings, and restart
+persistence. Expiry and summary preservation still need explicit verification before Release 2 is
+marked complete.
 
 ### Next releases
 

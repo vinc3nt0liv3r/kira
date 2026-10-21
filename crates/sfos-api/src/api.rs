@@ -1,14 +1,15 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use anyhow::Context;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use anyhow::Context;
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sfos_store::{Store, Tenant};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::query::{RangeQuery, TimeRange};
 
@@ -16,7 +17,8 @@ use crate::query::{RangeQuery, TimeRange};
 pub struct AppState {
     pub store: Store,
     pub default_slug: Option<String>,
-    pub raw_retention_hours: i64,
+    pub retention_admin_token: Option<Arc<str>>,
+    pub query_semaphore: Arc<Semaphore>,
 }
 
 #[derive(Debug)]
@@ -44,6 +46,29 @@ impl ApiError {
             message: msg.into(),
         }
     }
+    fn unavailable(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: msg.into(),
+        }
+    }
+    fn unauthorized() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: "valid bearer token required".into(),
+        }
+    }
+    fn database_error(err: &tokio_postgres::Error) -> Self {
+        if err.code() == Some(&tokio_postgres::error::SqlState::QUERY_CANCELED) {
+            Self::unavailable("database query exceeded the API statement timeout")
+        } else {
+            tracing::error!(%err, "api database request failed");
+            Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: "internal server error".into(),
+            }
+        }
+    }
     fn internal(err: anyhow::Error) -> Self {
         tracing::error!(%err, "api request failed");
         Self {
@@ -55,13 +80,17 @@ impl ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(err: anyhow::Error) -> Self {
-        Self::internal(err)
+        if let Some(database_error) = err.downcast_ref::<tokio_postgres::Error>() {
+            Self::database_error(database_error)
+        } else {
+            Self::internal(err)
+        }
     }
 }
 
 impl From<tokio_postgres::Error> for ApiError {
     fn from(err: tokio_postgres::Error) -> Self {
-        Self::internal(err.into())
+        Self::database_error(&err)
     }
 }
 
@@ -75,6 +104,16 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.status, Json(json!({ "error": self.message }))).into_response()
     }
+}
+
+fn acquire_query_permit(
+    query_semaphore: &Arc<Semaphore>,
+    busy_message: &'static str,
+) -> Result<OwnedSemaphorePermit, ApiError> {
+    query_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::unavailable(busy_message))
 }
 
 #[derive(Debug, Serialize)]
@@ -155,19 +194,18 @@ pub async fn meta(
     let tenants = state.store.list_tenants().await?;
     let last_event_at = state.store.last_event_at(tenant.id).await?;
     let rollups_ready = state.store.rollups_ready().await?;
+    let raw_retention_hours = state.store.global_retention_hours().await?;
 
     let client = state.store.pool().get().await?;
     let devices = client
         .query(
-            "SELECT COALESCE(NULLIF(device_name, ''), NULLIF(device_id, ''), 'unknown') AS name,
-                    COALESCE(device_id, attrs->>'device_serial_id') AS device_id,
-                    max(attrs->>'device_model') AS model,
-                    max(attrs->>'firmware_version') AS firmware,
-                    max(ts) AS last_seen,
-                    count(*)::bigint AS events
-             FROM events
-             WHERE tenant_id = $1 AND ts > now() - interval '5 minutes'
-             GROUP BY 1, 2
+            "SELECT name, device_id, max(model) AS model, max(firmware) AS firmware,
+                    max(last_seen) AS last_seen, sum(events)::bigint AS events
+             FROM device_activity
+             WHERE tenant_id = $1
+               AND bucket >= date_trunc('minute', now() - interval '5 minutes')
+               AND last_seen > now() - interval '5 minutes'
+             GROUP BY device_key, name, device_id
              ORDER BY last_seen DESC
              LIMIT 20",
             &[&tenant.id],
@@ -193,9 +231,98 @@ pub async fn meta(
         "server_time": Utc::now(),
         "last_event_at": last_event_at,
         "devices": devices,
-        "raw_retention_hours": state.raw_retention_hours,
+        "raw_retention_hours": raw_retention_hours,
         "rollups_ready": rollups_ready,
     })))
+}
+
+const RETENTION_CHOICES_HOURS: &[i64] = &[6, 12, 24, 48, 72, 168];
+
+pub async fn retention_preview(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let current_hours = state.store.global_retention_hours().await?;
+    let (database_bytes, raw_partition_bytes, bytes_per_hour) =
+        state.store.retention_storage_estimate().await?;
+    let base_bytes = database_bytes.saturating_sub(raw_partition_bytes);
+    let options: Vec<serde_json::Value> = RETENTION_CHOICES_HOURS
+        .iter()
+        .map(|hours| {
+            let projected = bytes_per_hour.map(|rate| {
+                base_bytes.saturating_add(rate.saturating_mul(hours.saturating_add(1)))
+            });
+            json!({
+                "hours": hours,
+                "estimated_database_bytes": projected,
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "global": true,
+        "current_hours": current_hours,
+        "choices_hours": RETENTION_CHOICES_HOURS,
+        "database_bytes": database_bytes,
+        "current_raw_partition_bytes": raw_partition_bytes,
+        "estimated_raw_bytes_per_hour": bytes_per_hour,
+        "options": options,
+        "admin_configured": state.retention_admin_token.is_some(),
+        "application_delay_minutes": 5,
+        "estimate_note": "Approximate projection from PostgreSQL partition statistics and recent partition sizes; includes one extra hour for whole-hour partition boundaries. It is not a storage guarantee.",
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RetentionUpdate {
+    retention_hours: i64,
+}
+
+pub async fn update_retention(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RetentionUpdate>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let Some(expected) = state.retention_admin_token.as_deref() else {
+        return Err(ApiError::unavailable(
+            "retention changes are disabled; configure RETENTION_ADMIN_TOKEN on the API service",
+        ));
+    };
+    let valid = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|token| constant_time_eq(token.as_bytes(), expected.as_bytes()));
+    if !valid {
+        return Err(ApiError::unauthorized());
+    }
+    if !RETENTION_CHOICES_HOURS.contains(&request.retention_hours) {
+        return Err(ApiError::bad_request(format!(
+            "retention_hours must be one of: {}",
+            RETENTION_CHOICES_HOURS
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    state
+        .store
+        .set_global_retention_hours(request.retention_hours)
+        .await?;
+    Ok(Json(json!({
+        "global": true,
+        "retention_hours": request.retention_hours,
+        "message": "Retention setting saved; expired hourly partitions are removed by collector maintenance within about five minutes after their rollups are refreshed.",
+    })))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= usize::from(
+            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
+        );
+    }
+    difference == 0
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -225,6 +352,10 @@ pub async fn overview(
     State(state): State<AppState>,
     Query(query): Query<RangeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _permit = acquire_query_permit(
+        &state.query_semaphore,
+        "dashboard query capacity is busy; retry shortly",
+    )?;
     let tenant = resolve_tenant(&state, query.tenant.as_deref()).await?;
     let range = resolve_range(&query)?;
     let client = state.store.pool().get().await?;
@@ -233,7 +364,7 @@ pub async fn overview(
     let rollup_to = hour_ceil(range.to)?;
 
     let totals_sql = if rollups_ready {
-                "WITH totals AS (
+        "WITH totals AS (
                     SELECT COALESCE(sum(events), 0)::bigint AS events,
                            COALESCE(sum(web_requests), 0)::bigint AS web_requests,
                            COALESCE(sum(allowed), 0)::bigint AS allowed,
@@ -253,8 +384,8 @@ pub async fn overview(
                 )
                 SELECT totals.*, identities.*
                 FROM totals CROSS JOIN identities"
-            } else {
-                "SELECT count(*)::bigint AS events,
+    } else {
+        "SELECT count(*)::bigint AS events,
                     count(*) FILTER (WHERE category_group = 'web'
                         AND COALESCE(con_event, '') <> 'Start')::bigint AS web_requests,
                     count(*) FILTER (WHERE action = 'allowed'
@@ -268,7 +399,7 @@ pub async fn overview(
                     count(DISTINCT domain)::bigint AS domains
              FROM events
              WHERE tenant_id = $1 AND ts >= $2 AND ts < $3"
-            };
+    };
     let totals_params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = if rollups_ready {
         vec![&tenant.id, &rollup_from, &rollup_to]
     } else {
@@ -293,7 +424,7 @@ pub async fn overview(
         range.bucket_secs
     };
     let series_sql = if rollups_ready {
-                "SELECT to_timestamp(floor(extract(epoch FROM bucket) / $4::bigint) * $4::bigint) AS bucket,
+        "SELECT to_timestamp(floor(extract(epoch FROM bucket) / $4::bigint) * $4::bigint) AS bucket,
                         sum(events)::bigint AS events,
                         sum(allowed)::bigint AS allowed,
                         sum(blocked)::bigint AS blocked,
@@ -304,8 +435,8 @@ pub async fn overview(
                    AND bucket >= $2 AND bucket < $3
                  GROUP BY 1
                  ORDER BY 1"
-            } else {
-                "SELECT to_timestamp(floor(extract(epoch FROM ts) / $4::bigint) * $4::bigint) AS bucket,
+    } else {
+        "SELECT to_timestamp(floor(extract(epoch FROM ts) / $4::bigint) * $4::bigint) AS bucket,
                     count(*)::bigint AS events,
                     count(*) FILTER (WHERE action = 'allowed'
                         AND COALESCE(con_event, '') <> 'Start')::bigint AS allowed,
@@ -317,7 +448,7 @@ pub async fn overview(
              WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
              GROUP BY 1
              ORDER BY 1"
-            };
+    };
     let series_params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = if rollups_ready {
         vec![&tenant.id, &rollup_from, &rollup_to, &bucket_secs]
     } else {
@@ -401,6 +532,10 @@ pub async fn top(
     State(state): State<AppState>,
     Query(query): Query<TopQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _permit = acquire_query_permit(
+        &state.query_semaphore,
+        "dashboard query capacity is busy; retry shortly",
+    )?;
     let dimension = query.dimension.as_deref().unwrap_or("users");
     let tenant = resolve_tenant(&state, query.tenant.as_deref()).await?;
     let range = resolve_range(&RangeQuery {
@@ -415,15 +550,15 @@ pub async fn top(
     let rollups_ready = state.store.rollups_ready().await?;
     let rollup_from = hour_floor(range.from)?;
     let rollup_to = hour_ceil(range.to)?;
-    let (sql, params): (String, Vec<&(dyn tokio_postgres::types::ToSql + Sync)>) =
-        if rollups_ready {
-            if dimension != "destinations" && dimension_expr(dimension).is_none() {
-                return Err(ApiError::bad_request(format!(
-                    "unknown dimension {dimension:?}"
-                )));
-            }
-            (
-                "SELECT key, sum(events)::bigint AS events,
+    let (sql, params): (String, Vec<&(dyn tokio_postgres::types::ToSql + Sync)>) = if rollups_ready
+    {
+        if dimension != "destinations" && dimension_expr(dimension).is_none() {
+            return Err(ApiError::bad_request(format!(
+                "unknown dimension {dimension:?}"
+            )));
+        }
+        (
+            "SELECT key, sum(events)::bigint AS events,
                         sum(blocked)::bigint AS blocked,
                         sum(bytes_up + bytes_down)::bigint AS bytes,
                         NULL::bigint AS users
@@ -434,17 +569,11 @@ pub async fn top(
                  HAVING sum(events) > 0
                  ORDER BY events DESC, bytes DESC
                  LIMIT $5"
-                    .to_string(),
-                vec![
-                    &tenant.id,
-                    &dimension,
-                    &rollup_from,
-                    &rollup_to,
-                    &limit,
-                ],
-            )
-        } else if dimension == "destinations" {
-            (
+                .to_string(),
+            vec![&tenant.id, &dimension, &rollup_from, &rollup_to, &limit],
+        )
+    } else if dimension == "destinations" {
+        (
                 "SELECT destination.key,
                         count(*)::bigint AS events,
                         count(*) FILTER (WHERE action = 'blocked')::bigint AS blocked,
@@ -465,20 +594,20 @@ pub async fn top(
                     .to_string(),
                 vec![&tenant.id, &range.from, &range.to, &limit],
             )
+    } else {
+        let expr = dimension_expr(dimension)
+            .ok_or_else(|| ApiError::bad_request(format!("unknown dimension {dimension:?}")))?;
+        let extra = if dimension == "threats" {
+            "AND category_group = 'threat'"
         } else {
-            let expr = dimension_expr(dimension)
-                .ok_or_else(|| ApiError::bad_request(format!("unknown dimension {dimension:?}")))?;
-            let extra = if dimension == "threats" {
-                "AND category_group = 'threat'"
-            } else {
-                ""
-            };
-            let users = if dimension == "users" {
-                "1::bigint"
-            } else {
-                "NULL::bigint"
-            };
-            (
+            ""
+        };
+        let users = if dimension == "users" {
+            "1::bigint"
+        } else {
+            "NULL::bigint"
+        };
+        (
                 format!(
                     "SELECT {expr} AS key,
                             count(*)::bigint AS events,
@@ -495,7 +624,7 @@ pub async fn top(
                 ),
                 vec![&tenant.id, &range.from, &range.to, &limit],
             )
-        };
+    };
     let rows = client.query(&sql, &params).await?;
     let rows: Vec<TopRow> = rows
         .iter()
@@ -545,6 +674,10 @@ pub async fn events(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _permit = acquire_query_permit(
+        &state.query_semaphore,
+        "event search capacity is busy; retry shortly",
+    )?;
     let tenant = resolve_tenant(&state, query.tenant.as_deref()).await?;
     let range = resolve_range(&RangeQuery {
         tenant: query.tenant.clone(),
@@ -552,11 +685,12 @@ pub async fn events(
         to: query.to.clone(),
         interval: None,
     })?;
-    let cutoff = raw_cutover(Utc::now(), state.raw_retention_hours);
+    let retention_hours = state.store.global_retention_hours().await?;
+    let cutoff = raw_cutover(Utc::now(), retention_hours);
     if range.to <= cutoff {
         return Err(ApiError::gone(format!(
             "raw event details are retained for {} hours",
-            state.raw_retention_hours
+            retention_hours
         )));
     }
     let raw_from = range.from.max(cutoff);
@@ -582,7 +716,10 @@ pub async fn events(
             "SELECT id, ts, category_group, action, log_type, log_component, device_name,
                     host(src_ip) AS src_ip, host(dst_ip) AS dst_ip, src_port, dst_port,
                     COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
-                    domain, url, http_method, http_status, category, application,
+                    domain, url, http_method, http_status, category,
+                    COALESCE(category_type, attrs->>'http_category_type',
+                             attrs->>'category_type') AS category_type,
+                    application,
                     fw_rule_name, sent_bytes, recv_bytes, threat_name, message
              FROM events
              WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
@@ -591,13 +728,18 @@ pub async fn events(
                     OR url ILIKE '%' || $4 || '%'
                     OR message ILIKE '%' || $4 || '%'
                     OR threat_name ILIKE '%' || $4 || '%'
+                    OR category ILIKE '%' || $4 || '%'
+                    OR COALESCE(category_type, attrs->>'http_category_type',
+                                attrs->>'category_type') ILIKE '%' || $4 || '%'
                     OR fw_rule_name ILIKE '%' || $4 || '%'
                     OR host(src_ip) = $4)
                AND ($5::text IS NULL OR action = $5)
                AND ($6::text IS NULL OR category_group = $6)
              ORDER BY ts DESC, id DESC
              LIMIT $7 OFFSET $8",
-            &[&tenant.id, &raw_from, &range.to, &q, &action, &group, &limit, &offset],
+            &[
+                &tenant.id, &raw_from, &range.to, &q, &action, &group, &limit, &offset,
+            ],
         )
         .await?;
     let rows: Vec<serde_json::Value> = rows
@@ -621,6 +763,7 @@ pub async fn events(
                 "method": row.get::<_, Option<String>>("http_method"),
                 "status": row.get::<_, Option<i32>>("http_status"),
                 "category": row.get::<_, Option<String>>("category"),
+                "category_type": row.get::<_, Option<String>>("category_type"),
                 "application": row.get::<_, Option<String>>("application"),
                 "rule": row.get::<_, Option<String>>("fw_rule_name"),
                 "bytes_up": row.get::<_, Option<i64>>("sent_bytes"),
@@ -633,7 +776,7 @@ pub async fn events(
 
     Ok(Json(json!({
         "range": { "from": raw_from, "to": range.to },
-        "raw_window_hours": state.raw_retention_hours,
+        "raw_window_hours": retention_hours,
         "limit": limit,
         "offset": offset,
         "rows": rows,
@@ -674,6 +817,19 @@ pub async fn healthz(State(state): State<AppState>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saturated_query_capacity_returns_service_unavailable() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let permit = acquire_query_permit(&semaphore, "busy").unwrap();
+        let error = match acquire_query_permit(&semaphore, "busy") {
+            Ok(_) => panic!("query slot should be saturated"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        drop(permit);
+        assert!(acquire_query_permit(&semaphore, "busy").is_ok());
+    }
 
     #[test]
     fn fills_empty_buckets_and_keeps_data() {
@@ -718,5 +874,18 @@ mod tests {
             Some("COALESCE(NULLIF(user_name, ''), host(src_ip))")
         );
         assert!(dimension_expr("domain; drop table events").is_none());
+    }
+
+    #[test]
+    fn retention_tokens_are_compared_exactly() {
+        assert!(constant_time_eq(b"secret", b"secret"));
+        assert!(!constant_time_eq(b"secret", b"Secret"));
+        assert!(!constant_time_eq(b"secret", b"secret-longer"));
+    }
+
+    #[test]
+    fn retention_choices_are_explicit() {
+        assert_eq!(RETENTION_CHOICES_HOURS, &[6, 12, 24, 48, 72, 168]);
+        assert!(!RETENTION_CHOICES_HOURS.contains(&7));
     }
 }

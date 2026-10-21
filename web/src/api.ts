@@ -3,6 +3,7 @@ import type {
   EventsResponse,
   Meta,
   Overview,
+  RetentionPreview,
   TopResponse,
 } from "./types";
 
@@ -47,4 +48,28 @@ export const api = {
     opts: { q?: string; action?: string; group?: string; limit?: number },
     signal?: AbortSignal,
   ) => get<EventsResponse>("/events", { tenant, from, ...opts }, signal),
+  retention: (signal?: AbortSignal) =>
+    get<RetentionPreview>("/retention", {}, signal),
+  updateRetention: async (retention_hours: number, token: string): Promise<{ retention_hours: number; message: string }> => {
+    const res = await fetch(`${BASE}/retention`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ retention_hours }),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as { retention_hours: number; message: string };
+  },
 };

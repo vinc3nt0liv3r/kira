@@ -24,6 +24,19 @@ export interface Meta {
   rollups_ready: boolean;
 }
 
+export interface RetentionPreview {
+  global: boolean;
+  current_hours: number;
+  choices_hours: number[];
+  database_bytes: number;
+  current_raw_partition_bytes: number;
+  estimated_raw_bytes_per_hour: number | null;
+  options: Array<{ hours: number; estimated_database_bytes: number | null }>;
+  admin_configured: boolean;
+  application_delay_minutes: number;
+  estimate_note: string;
+}
+
 export interface Totals {
   events: number;
   web_requests: number;
@@ -93,6 +106,7 @@ export interface EventRow {
   method: string | null;
   status: number | null;
   category: string | null;
+  category_type: string | null;
   application: string | null;
   rule: string | null;
   bytes_up: number | null;

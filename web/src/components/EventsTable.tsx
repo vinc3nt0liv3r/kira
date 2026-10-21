@@ -175,8 +175,14 @@ function FragmentRow({
             {row.url ?? row.log_component ?? row.log_type}
           </p>
         </td>
-        <td className="max-w-[150px] truncate px-3 py-2 text-slate-400" title={row.category ?? undefined}>
-          {row.category ?? "—"}
+        <td
+          className="max-w-[150px] truncate px-3 py-2 text-slate-400"
+          title={[row.category, row.category_type].filter(Boolean).join(" · ") || undefined}
+        >
+          <div>{row.category ?? "—"}</div>
+          {row.category_type ? (
+            <div className="text-[10px] text-slate-600">{row.category_type}</div>
+          ) : null}
         </td>
         <td className="tabular whitespace-nowrap px-3 py-2 text-right text-slate-400">
           <div>{row.bytes_down != null ? `↓ ${fmtBytes(row.bytes_down)}` : "—"}</div>
