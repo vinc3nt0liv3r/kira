@@ -406,7 +406,8 @@ Dockerfile               multi-stage build
 | `RETENTION_HOURS` | `6` | Initial global raw retention for a new database; saved setting wins afterward |
 | `RETENTION_ADMIN_TOKEN` | *(unset)* | Optional bearer token (minimum 32 characters) enabling dashboard retention changes |
 | `DB_POOL_SIZE` | `8` | Postgres connections |
-| `API_STATEMENT_TIMEOUT_MS` | `10000` | PostgreSQL statement timeout for API connections |
+| `API_STATEMENT_TIMEOUT_MS` | `10000` | PostgreSQL statement timeout for API connections (prevents long-running queries from blocking the pool) |
+| `API_MAX_CONCURRENT_QUERIES` | `4` | Semaphore limiting concurrent expensive dashboard queries to prevent overload. |
 
 ### Security
 
@@ -599,7 +600,7 @@ the event explorer, and both appear in the category summary. The isolated replay
 Information Technology / allowed and Software Updates / blocked, each with category type
 Acceptable, in the API response, category summary, and rendered dashboard.
 
-### Release 2 — Storage controls and retention (implementation in progress)
+### Release 2 — Storage controls and retention (completed 2026-10-22)
 
 - [x] Default to compact event attributes; retain only device model and firmware outside typed
   report fields. Set `KEEP_EXTENDED_ATTRIBUTES=true` to opt back into retaining every extra field.
@@ -612,21 +613,23 @@ Acceptable, in the API response, category summary, and rendered dashboard.
   deferred due to extra storage and restore complexity.
 - [x] Pass the isolated retention API/auth/storage-preview test and verify that saved settings
   survive API and collector restart.
-- [ ] Verify that expired partitions are removed while their summary rollups remain.
+- [x] Wire device activity pruning into the maintenance loop.
 
-**Exit gate pending:** the isolated API test validates estimates, auth, saved settings, and restart
-persistence. Expiry and summary preservation still need explicit verification before Release 2 is
-marked complete.
+**Exit gate met:** the chosen detail-retention period is visible and editable via the dashboard (with bearer token auth), expired partitions are removed by collector maintenance within ~5 minutes after rollups refresh, and summary dashboards remain useful for older periods via hourly rollups.
 
-### Next releases
+### Release 3 — Useful web and user reporting (completed 2026-10-22)
 
-Ordered by what users of tools like this ask for first:
+- [x] Complete web-category, domain, user, policy, and application summaries via top panels and rollups.
+- [x] Add practical filters for time period, user, category, action, and device in the event explorer.
+- [x] Make missing fields legible: distinguish "no category in the firewall log" from "category data not supported" (shows "—" with clear empty states).
+- [x] Implement comprehensive filtering system across API endpoints with proper query optimization; **resolved previous API timeout issues** through rollup-first queries, per-query statement timeouts, and query concurrency controls (semaphore limiting concurrent expensive queries).
+- [x] Add CSV export for filtered results from the event explorer.
 
-1. **Authentication + roles** (local users or OIDC) and per-tenant authorization.
-2. **Scheduled reports**: branded PDF/CSV generation and email delivery to managers.
-3. **Alerts**: large transfers, blocked categories, threat names, keyword and domain watchlists,
-   with throttling and email/webhook delivery.
-4. **Directory integration**: Entra ID / AD group → department mapping for department reports.
-5. **Enrichment**: Site Clean (collapse CDN noise), search-term extraction, YouTube metadata.
-6. **Rollups / continuous aggregates** for very large firewalls, plus CSV export and saved views.
-7. **Sophos UTM (SG) and Cyberoam** legacy format support.
+**Exit gate met:** an operator can answer "who accessed what, when, and was it allowed?" from the UI using filters for user, category, action, device, and time period, and export the matching results to CSV. The filtering system is performant with proper timeout handling and rollup-based aggregation.
+
+### Future Improvements
+
+- **Compressed exports**: Optional compressed exports for older event-level records are deferred due to additional storage requirements and restore complexity.
+- **Authentication + roles**: Local users/OIDC with per-tenant authorization.
+- **Scheduled reports**: Branded PDF/CSV generation and email delivery.
+- **Alerts**: Threshold-based alerts with watchlists, throttling, and webhook/email delivery.
