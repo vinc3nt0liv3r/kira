@@ -115,6 +115,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/events", get(api::events))
         .route(
+            "/api/v1/events/export",
+            get(api::events_export),
+        )
+        .route(
             "/api/v1/retention",
             get(api::retention_preview).put(api::update_retention),
         )

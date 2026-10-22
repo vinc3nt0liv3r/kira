@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { fmtBytes, fmtTime } from "../format";
 import type { EventRow } from "../types";
+import { api } from "../api";
 import { ActionBadge, Badge, Card, Spinner } from "./ui";
 
 const GROUPS = ["web", "threat", "firewall", "vpn", "auth", "system", "other"];
@@ -16,6 +17,14 @@ export function EventsTable({
   onAction,
   group,
   onGroup,
+  tenant,
+  from,
+  user,
+  onUser,
+  category,
+  onCategory,
+  device,
+  onDevice,
 }: {
   rows: EventRow[];
   loading: boolean;
@@ -27,64 +36,111 @@ export function EventsTable({
   onAction: (value: string) => void;
   group: string;
   onGroup: (value: string) => void;
+  tenant: string;
+  from: string;
+  user: string;
+  onUser: (value: string) => void;
+  category: string;
+  onCategory: (value: string) => void;
+  device: string;
+  onDevice: (value: string) => void;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
     <Card>
-      <div className="flex flex-wrap items-end justify-between gap-3 px-5 pt-4">
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight text-slate-100">Recent activity</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Latest {rows.length} matching log entries · raw details retained {rawRetentionHours}h
-            {loading ? " · refreshing" : ""}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 pb-1">
-          <div className="relative">
-            <svg
-              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3.5-3.5" />
-            </svg>
+        <div className="flex flex-wrap items-end justify-between gap-3 px-5 pt-4">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight text-slate-100">Recent activity</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Latest {rows.length} matching log entries · raw details retained {rawRetentionHours}h
+              {loading ? " · refreshing" : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pb-1">
+            <div className="relative">
+              <svg
+                className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => onQuery(event.target.value)}
+                placeholder="User, domain, URL, IP, rule…"
+                className="w-56 rounded-lg border border-white/10 bg-black/30 py-1.5 pl-8 pr-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
+              />
+            </div>
             <input
               type="search"
-              value={query}
-              onChange={(event) => onQuery(event.target.value)}
-              placeholder="User, domain, URL, IP, rule…"
-              className="w-56 rounded-lg border border-white/10 bg-black/30 py-1.5 pl-8 pr-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
+              value={user}
+              onChange={(event) => onUser(event.target.value)}
+              placeholder="Filter user"
+              className="w-36 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
             />
+            <input
+              type="search"
+              value={category}
+              onChange={(event) => onCategory(event.target.value)}
+              placeholder="Filter category"
+              className="w-40 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
+            />
+            <input
+              type="search"
+              value={device}
+              onChange={(event) => onDevice(event.target.value)}
+              placeholder="Filter device"
+              className="w-36 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
+            />
+            <select
+              value={action}
+              onChange={(event) => onAction(event.target.value)}
+              className="rounded-lg border border-white/10 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-300 focus:border-emerald-400/40 focus:outline-none"
+            >
+              <option value="">All decisions</option>
+              <option value="allowed">Allowed</option>
+              <option value="blocked">Blocked</option>
+              <option value="warned">Warned</option>
+            </select>
+            <select
+              value={group}
+              onChange={(event) => onGroup(event.target.value)}
+              className="rounded-lg border border-white/10 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-300 focus:border-emerald-400/40 focus:outline-none"
+            >
+              <option value="">All log types</option>
+              {GROUPS.map((option) => (
+                <option key={option} value={option}>
+                  {option[0].toUpperCase() + option.slice(1)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() =>
+                api.exportEvents({
+                  tenant,
+                  from,
+                  q: query || undefined,
+                  action: action || undefined,
+                  group: group || undefined,
+                  user: user || undefined,
+                  category: category || undefined,
+                  device: device || undefined,
+                })
+              }
+              className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100"
+            >
+              Export CSV
+            </button>
+            {loading ? <Spinner /> : null}
           </div>
-          <select
-            value={action}
-            onChange={(event) => onAction(event.target.value)}
-            className="rounded-lg border border-white/10 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-300 focus:border-emerald-400/40 focus:outline-none"
-          >
-            <option value="">All decisions</option>
-            <option value="allowed">Allowed</option>
-            <option value="blocked">Blocked</option>
-            <option value="warned">Warned</option>
-          </select>
-          <select
-            value={group}
-            onChange={(event) => onGroup(event.target.value)}
-            className="rounded-lg border border-white/10 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-300 focus:border-emerald-400/40 focus:outline-none"
-          >
-            <option value="">All log types</option>
-            {GROUPS.map((option) => (
-              <option key={option} value={option}>
-                {option[0].toUpperCase() + option.slice(1)}
-              </option>
-            ))}
-          </select>
-          {loading ? <Spinner /> : null}
         </div>
-      </div>
 
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[980px] border-collapse text-left">

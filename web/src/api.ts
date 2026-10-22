@@ -45,9 +45,26 @@ export const api = {
   events: (
     tenant: string,
     from: string,
-    opts: { q?: string; action?: string; group?: string; limit?: number },
+    opts: { q?: string; action?: string; group?: string; user?: string; category?: string; device?: string; limit?: number },
     signal?: AbortSignal,
   ) => get<EventsResponse>("/events", { tenant, from, ...opts }, signal),
+  exportEvents: (filters: {
+    tenant: string;
+    from: string;
+    q?: string;
+    action?: string;
+    group?: string;
+    user?: string;
+    category?: string;
+    device?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value === undefined || value === null || value === "") continue;
+      qs.set(key, String(value));
+    }
+    window.open(`${BASE}/events/export?${qs.toString()}`, "_blank");
+  },
   retention: (signal?: AbortSignal) =>
     get<RetentionPreview>("/retention", {}, signal),
   updateRetention: async (retention_hours: number, token: string): Promise<{ retention_hours: number; message: string }> => {

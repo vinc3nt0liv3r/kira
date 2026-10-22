@@ -55,6 +55,12 @@ export default function App() {
   const debouncedQuery = useDebounced(query, 300);
   const [action, setAction] = useState("");
   const [group, setGroup] = useState("");
+  const [user, setUser] = useState("");
+  const debouncedUser = useDebounced(user, 300);
+  const [category, setCategory] = useState("");
+  const debouncedCategory = useDebounced(category, 300);
+  const [device, setDevice] = useState("");
+  const debouncedDevice = useDebounced(device, 300);
 
   const spanHours = useMemo(
     () => RANGES.find((option) => option.id === range)?.hours ?? 24,
@@ -110,6 +116,9 @@ export default function App() {
             q: debouncedQuery || undefined,
             action: action || undefined,
             group: group || undefined,
+            user: debouncedUser || undefined,
+            category: debouncedCategory || undefined,
+            device: debouncedDevice || undefined,
             limit: 100,
           },
           controller.signal,
@@ -142,7 +151,7 @@ export default function App() {
       controller.abort();
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
     };
-  }, [tenant, range, tick, debouncedQuery, action, group, live]);
+  }, [tenant, range, tick, debouncedQuery, action, group, debouncedUser, debouncedCategory, debouncedDevice, live]);
 
   const refresh = () => setTick((value) => value + 1);
   const hasData = overview !== null;
@@ -334,6 +343,14 @@ export default function App() {
               onAction={setAction}
               group={group}
               onGroup={setGroup}
+              tenant={tenant}
+              from={range}
+              user={user}
+              onUser={setUser}
+              category={category}
+              onCategory={setCategory}
+              device={device}
+              onDevice={setDevice}
             />
           </>
         )}

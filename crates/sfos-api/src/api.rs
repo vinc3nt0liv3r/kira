@@ -668,6 +668,9 @@ pub struct EventsQuery {
     pub q: Option<String>,
     pub action: Option<String>,
     pub group: Option<String>,
+    pub user: Option<String>,
+    pub category: Option<String>,
+    pub device: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -711,6 +714,18 @@ pub async fn events(
             "web" | "threat" | "firewall" | "auth" | "vpn" | "system" | "other"
         )
     });
+    let user_filter = query
+        .user
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let category_filter = query
+        .category
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let device_filter = query
+        .device
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let client = state.store.pool().get().await?;
     let rows = client
@@ -737,10 +752,15 @@ pub async fn events(
                     OR host(src_ip) = $4)
                AND ($5::text IS NULL OR action = $5)
                AND ($6::text IS NULL OR category_group = $6)
+               AND ($9::text IS NULL OR COALESCE(NULLIF(user_name, ''), host(src_ip)) ILIKE '%' || $9 || '%')
+            AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
+                 OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
+            AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%' OR device_id ILIKE '%' || $11 || '%')
              ORDER BY ts DESC, id DESC
              LIMIT $7 OFFSET $8",
             &[
                 &tenant.id, &raw_from, &range.to, &q, &action, &group, &limit, &offset,
+                &user_filter, &category_filter, &device_filter,
             ],
         )
         .await?;
@@ -785,7 +805,188 @@ pub async fn events(
     })))
 }
 
+pub async fn events_export(
+    State(state): State<AppState>,
+    Query(query): Query<EventsQuery>,
+) -> Result<Response, ApiError> {
+    let _permit = acquire_query_permit(
+        &state.query_semaphore,
+        "event export capacity is busy; retry shortly",
+    )?;
+    let tenant = resolve_tenant(&state, query.tenant.as_deref()).await?;
+    let range = resolve_range(&RangeQuery {
+        tenant: query.tenant.clone(),
+        from: query.from.clone(),
+        to: query.to.clone(),
+        interval: None,
+    })?;
+    let retention_hours = state.store.global_retention_hours().await?;
+    let cutoff = raw_cutover(Utc::now(), retention_hours);
+    if range.to <= cutoff {
+        return Err(ApiError::gone(format!(
+            "raw event details are retained for {} hours",
+            retention_hours
+        )));
+    }
+    let raw_from = range.from.max(cutoff);
+    let q = query
+        .q
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let action = query
+        .action
+        .filter(|a| matches!(a.as_str(), "allowed" | "blocked" | "warned"));
+    let group = query.group.filter(|g| {
+        matches!(
+            g.as_str(),
+            "web" | "threat" | "firewall" | "auth" | "vpn" | "system" | "other"
+        )
+    });
+    let user_filter = query
+        .user
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let category_filter = query
+        .category
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let device_filter = query
+        .device
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let client = state.store.pool().get().await?;
+    let rows = client
+        .query(
+            "SELECT ts, log_type, log_component, category_group, action, display_user,
+                    COALESCE(domain, host(dst_ip)) AS destination, application, category,
+                    COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type,
+                    url, host(src_ip) AS src_ip, host(dst_ip) AS dst_ip, fw_rule_name,
+                    sent_bytes, recv_bytes, threat_name, message, device_name
+             FROM (
+                 SELECT id, ts, category_group, action, log_type, log_component, device_name,
+                        host(src_ip) AS src_ip, host(dst_ip) AS dst_ip,
+                        COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
+                        domain, url, http_method, http_status, category,
+                        attrs,
+                        COALESCE(category_type, attrs->>'http_category_type',
+                                 attrs->>'category_type') AS category_type,
+                        application,
+                        fw_rule_name, sent_bytes, recv_bytes, threat_name, message
+                 FROM events
+             ) e
+             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
+               AND ($4::text IS NULL OR display_user ILIKE '%' || $4 || '%'
+                    OR domain ILIKE '%' || $4 || '%'
+                    OR url ILIKE '%' || $4 || '%'
+                    OR message ILIKE '%' || $4 || '%'
+                    OR threat_name ILIKE '%' || $4 || '%'
+                    OR category ILIKE '%' || $4 || '%'
+                    OR COALESCE(category_type, attrs->>'http_category_type',
+                                attrs->>'category_type') ILIKE '%' || $4 || '%'
+                    OR fw_rule_name ILIKE '%' || $4 || '%'
+                    OR src_ip = $4)
+               AND ($5::text IS NULL OR action = $5)
+               AND ($6::text IS NULL OR category_group = $6)
+               AND ($9::text IS NULL OR display_user ILIKE '%' || $9 || '%')
+            AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
+                 OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
+            AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%')
+             ORDER BY ts ASC",
+            &[
+                &tenant.id, &raw_from, &range.to, &q, &action, &group,
+                &100_000i64, &0i64,
+                &user_filter, &category_filter, &device_filter,
+            ],
+        )
+        .await?;
+
+    let mut body = String::from("timestamp,log_type,log_component,group,action,user,destination,application,category,category_type,url,src_ip,dst_ip,policy,bytes_up,bytes_down,threat,message,device\n");
+    for row in rows {
+        let ts: DateTime<Utc> = row.get("ts");
+        let log_type: String = row.get("log_type");
+        let log_component: Option<String> = row.get("log_component");
+        let group: String = row.get("group");
+        let action: Option<String> = row.get("action");
+        let user: Option<String> = row.get("display_user");
+        let destination: Option<String> = row.get("destination");
+        let application: Option<String> = row.get("application");
+        let category: Option<String> = row.get("category");
+        let category_type: Option<String> = row.get("category_type");
+        let url: Option<String> = row.get("url");
+        let src_ip: Option<String> = row.get("src_ip");
+        let dst_ip: Option<String> = row.get("dst_ip");
+        let policy: Option<String> = row.get("fw_rule_name");
+        let bytes_up: Option<i64> = row.get("sent_bytes");
+        let bytes_down: Option<i64> = row.get("recv_bytes");
+        let threat: Option<String> = row.get("threat_name");
+        let message: Option<String> = row.get("message");
+        let device: Option<String> = row.get("device_name");
+
+        let mut line = String::new();
+        line.push_str(&csv_escape(ts.to_rfc3339()));
+        line.push(',');
+        line.push_str(&csv_escape(log_type));
+        line.push(',');
+        line.push_str(&csv_escape(log_component.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(group));
+        line.push(',');
+        line.push_str(&csv_escape(action.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(user.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(destination.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(application.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(category.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(category_type.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(url.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(src_ip.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(dst_ip.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(policy.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(bytes_up.map(|v| v.to_string()).unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(bytes_down.map(|v| v.to_string()).unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(threat.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(message.unwrap_or_default()));
+        line.push(',');
+        line.push_str(&csv_escape(device.unwrap_or_default()));
+        line.push('\n');
+        body.push_str(&line);
+    }
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        "text/csv; charset=utf-8".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"kira-events-{}.csv\"", Utc::now().format("%Y%m%dT%H%M%SZ")).parse().unwrap(),
+    );
+    Ok((headers, body).into_response())
+}
+
+fn csv_escape(value: String) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value
+    }
+}
+
 pub async fn healthz(State(state): State<AppState>) -> Response {
+    let db = state.store.ping().await;
     let db = state.store.ping().await;
     let tenant = match state.default_slug.as_deref() {
         Some(slug) => state.store.tenant_by_slug(slug).await.ok().flatten(),

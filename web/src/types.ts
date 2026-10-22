@@ -121,3 +121,14 @@ export interface EventsResponse {
   offset: number;
   rows: EventRow[];
 }
+
+export interface EventsFilters {
+  tenant: string;
+  from: string;
+  q?: string;
+  action?: string;
+  group?: string;
+  user?: string;
+  category?: string;
+  device?: string;
+}
