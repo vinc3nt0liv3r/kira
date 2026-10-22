@@ -599,6 +599,8 @@ pub async fn top(
             .ok_or_else(|| ApiError::bad_request(format!("unknown dimension {dimension:?}")))?;
         let extra = if dimension == "threats" {
             "AND category_group = 'threat'"
+        } else if dimension == "categories" {
+            "AND category_group IN ('web', 'threat')"
         } else {
             ""
         };
@@ -887,5 +889,15 @@ mod tests {
     fn retention_choices_are_explicit() {
         assert_eq!(RETENTION_CHOICES_HOURS, &[6, 12, 24, 48, 72, 168]);
         assert!(!RETENTION_CHOICES_HOURS.contains(&7));
+    }
+
+    #[test]
+    fn retention_choices_are_within_valid_range() {
+        for &hours in RETENTION_CHOICES_HOURS {
+            assert!((1..=168).contains(&hours), "{hours} is outside 1-168");
+        }
+        let mut sorted = RETENTION_CHOICES_HOURS.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(RETENTION_CHOICES_HOURS, &sorted, "choices must be sorted ascending");
     }
 }

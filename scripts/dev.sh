@@ -57,11 +57,13 @@ start_app() {
   DATABASE_URL="$DATABASE_URL" TENANT_SLUG="$TENANT_SLUG" TENANT_NAME="$TENANT_NAME" \
     SYSLOG_UDP_ADDR="0.0.0.0:$SYSLOG_PORT" SYSLOG_TCP_ADDR="0.0.0.0:$SYSLOG_PORT" \
     HEALTH_ADDR="0.0.0.0:$HEALTH_PORT" RUST_LOG="$RUST_LOG" \
+    RETENTION_HOURS="${RETENTION_HOURS:-6}" KEEP_EXTENDED_ATTRIBUTES="${KEEP_EXTENDED_ATTRIBUTES:-false}" \
     setsid nohup ./target/release/sfos-ingest >>"$RUNTIME/logs/ingest.log" 2>&1 &
   echo $! >"$RUNTIME/run/ingest.pid"
 
   DATABASE_URL="$DATABASE_URL" API_ADDR="0.0.0.0:$API_PORT" WEB_DIR=web/dist \
     TENANT_SLUG="$TENANT_SLUG" RUST_LOG="$RUST_LOG" \
+    RETENTION_ADMIN_TOKEN="${RETENTION_ADMIN_TOKEN:-}" \
     setsid nohup ./target/release/sfos-api >>"$RUNTIME/logs/api.log" 2>&1 &
   echo $! >"$RUNTIME/run/api.pid"
 

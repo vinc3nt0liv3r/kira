@@ -147,6 +147,28 @@ def main() -> int:
     check("blocked filter only blocked", all(row["action"] == "blocked" for row in blocked["rows"]))
     check("blocked filter returns rows", len(blocked["rows"]) > 0)
 
+    # Category assertions: top dimension and event search by category.
+    cats = get(base, f"/api/v1/top?{window}&dimension=categories&limit=10")["rows"]
+    expected_cats = {"Search Engines", "Streaming Media", "Social Networking",
+                     "Information Technology", "Business", "Content Delivery Networks",
+                     "Web-based Email"}
+    found_cats = {row["key"] for row in cats}
+    check("top categories include seeded categories",
+          expected_cats.issubset(found_cats), f"found {found_cats}")
+    check("top categories ranked",
+          all(cats[i]["events"] >= cats[i + 1]["events"] for i in range(len(cats) - 1)))
+
+    term = urllib.parse.quote("Streaming Media")
+    found = get(base, f"/api/v1/events?{window}&q={term}&limit=50")["rows"]
+    check("category search returns rows", len(found) > 0)
+    check(
+        "category search rows match",
+        all(
+            row.get("category") == "Streaming Media"
+            for row in found
+        ),
+    )
+
     term = urllib.parse.quote("alice")
     found = get(base, f"/api/v1/events?{window}&q={term}&limit=50")["rows"]
     check("search returns rows", len(found) > 0)
