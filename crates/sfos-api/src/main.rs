@@ -84,7 +84,10 @@ async fn main() -> Result<()> {
         .initialize_global_retention(raw_retention_hours)
         .await?;
     store.ensure_tenant(&tenant_slug, &tenant_name).await?;
-    let query_concurrency = db_pool_size.saturating_sub(1).clamp(1, 2);
+    let query_concurrency: usize = std::env::var("API_MAX_CONCURRENT_QUERIES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| db_pool_size.saturating_sub(1).clamp(1, 2));
     let rollups_ready = store.rollups_ready().await?;
     if !rollups_ready {
         tracing::warn!(
