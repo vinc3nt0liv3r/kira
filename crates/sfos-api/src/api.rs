@@ -864,7 +864,7 @@ pub async fn events_export(
                     url, host(src_ip) AS src_ip, host(dst_ip) AS dst_ip, fw_rule_name,
                     sent_bytes, recv_bytes, threat_name, message, device_name
              FROM (
-                 SELECT id, ts, category_group, action, log_type, log_component, device_name,
+                 SELECT tenant_id, id, ts, category_group, action, log_type, log_component, device_name,
                         host(src_ip) AS src_ip, host(dst_ip) AS dst_ip,
                         COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
                         domain, url, http_method, http_status, category,
@@ -889,9 +889,9 @@ pub async fn events_export(
                AND ($5::text IS NULL OR action = $5)
                AND ($6::text IS NULL OR category_group = $6)
                AND ($9::text IS NULL OR display_user ILIKE '%' || $9 || '%')
-            AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
-                 OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
-            AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%')
+               AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
+                    OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
+               AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%')
              ORDER BY ts ASC",
             &[
                 &tenant.id, &raw_from, &range.to, &q, &action, &group,
