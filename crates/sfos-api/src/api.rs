@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, str::FromStr};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Context;
 use axum::extract::{Query, State};
@@ -6,7 +6,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
-use lettre::message::SinglePart;
 use lettre::Transport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1529,7 +1528,7 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
     let row_count = rows.len() as i64;
 
     // Generate content
-    let (content, content_type, extension) = match schedule.format.as_str() {
+    let (content, _content_type, extension) = match schedule.format.as_str() {
         "csv" => {
             let mut body = String::from("timestamp,log_type,log_component,group,action,user,destination,application,category,category_type,url,src_ip,dst_ip,policy,bytes_up,bytes_down,threat,message,device\n");
             for row in &rows {

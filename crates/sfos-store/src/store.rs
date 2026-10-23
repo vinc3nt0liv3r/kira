@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use futures_util::SinkExt;
-use serde::Serialize;
 use sfos_core::Event;
 use tokio_postgres::NoTls;
 use uuid::Uuid;
