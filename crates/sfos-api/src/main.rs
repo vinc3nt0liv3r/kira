@@ -189,8 +189,16 @@ async fn main() -> Result<()> {
                 .delete(api::delete_report_schedule),
         )
         .route(
+            "/api/v1/reports/schedules/{id}/generate",
+            post(api::generate_report_now),
+        )
+        .route(
             "/api/v1/reports/schedules/{id}/results",
             get(api::list_report_results),
+        )
+        .route(
+            "/api/v1/reports/schedules/{schedule_id}/results/{result_id}/download",
+            get(api::download_report_result),
         )
         .route(
             "/api/v1/alerts/rules",

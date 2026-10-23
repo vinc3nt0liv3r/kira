@@ -753,6 +753,31 @@ impl Store {
         Ok(rows.iter().map(|row| ReportResult::from(row)).collect())
     }
 
+    pub async fn get_report_schedule(&self, id: Uuid) -> Result<Option<ReportSchedule>> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt(
+                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters,
+                        enabled, last_run, next_run, created_at, updated_at
+                 FROM report_schedules WHERE id = $1",
+                &[&id],
+            )
+            .await?;
+        Ok(row.map(|row| ReportSchedule::from(&row)))
+    }
+
+    pub async fn get_report_result(&self, id: Uuid) -> Result<Option<ReportResult>> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt(
+                "SELECT id, schedule_id, status, file_path, row_count, error_message, generated_at, sent_at
+                 FROM report_results WHERE id = $1",
+                &[&id],
+            )
+            .await?;
+        Ok(row.map(|row| ReportResult::from(&row)))
+    }
+
     pub async fn mark_report_result_sent(&self, id: Uuid) -> Result<()> {
         let client = self.pool.get().await?;
         client

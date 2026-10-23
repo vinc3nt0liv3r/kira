@@ -1344,6 +1344,58 @@ pub async fn list_report_results(
     })))
 }
 
+pub async fn generate_report_now(
+    State(state): State<AppState>,
+    axum::extract::Path(schedule_id): axum::extract::Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let schedule = state
+        .store
+        .get_report_schedule(schedule_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("report schedule not found"))?;
+    if schedule.tenant_id != tenant.id {
+        return Err(ApiError::not_found("report schedule not found"));
+    }
+    let now = Utc::now();
+    generate_and_send_report(&state, &schedule, now).await?;
+    Ok(Json(json!({"message": "report generation started"})))
+}
+
+pub async fn download_report_result(
+    State(state): State<AppState>,
+    axum::extract::Path(result_id): axum::extract::Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let result = state
+        .store
+        .get_report_result(result_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("report result not found"))?;
+    let file_path = result
+        .file_path
+        .ok_or_else(|| ApiError::not_found("report file not found"))?;
+    let content = std::fs::read(&file_path)
+        .map_err(|e| ApiError::not_found(format!("report file not readable: {e}")))?;
+    let content_type = if file_path.ends_with(".pdf") {
+        "application/pdf"
+    } else if file_path.ends_with(".csv") {
+        "text/csv"
+    } else {
+        "application/octet-stream"
+    };
+    let file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("report");
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", content_type)
+        .header("Content-Disposition", format!("attachment; filename=\"{}\"", file_name))
+        .header("Content-Length", content.len())
+        .body(axum::body::Body::from(content))
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
+}
+
 // Alert rule handlers
 pub async fn list_alert_rules(
     State(state): State<AppState>,

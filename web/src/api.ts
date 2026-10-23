@@ -274,4 +274,52 @@ export const api = {
   },
   listReportResults: (scheduleId: string, signal?: AbortSignal) =>
     get<{ results: ReportResult[] }>(`/api/v1/reports/schedules/${scheduleId}/results`, {}, signal),
+  generateReportNow: async (scheduleId: string): Promise<{ message: string }> => {
+    const res = await fetch(`${BASE}/reports/schedules/${scheduleId}/generate`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as { message: string };
+  },
+  downloadReportResult: async (resultId: string): Promise<void> => {
+    const res = await fetch(`${BASE}/reports/schedules/0/results/${resultId}/download`, {
+      method: "GET",
+      headers: { Accept: "application/octet-stream" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const disposition = res.headers.get("Content-Disposition");
+    const filename = disposition
+      ?.match(/filename[^;=\n]*=((['"])(.*?)\2|[^\n;]*)/)
+      ?.pop()?.replace(/['"]/g, "") || "report";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
 };

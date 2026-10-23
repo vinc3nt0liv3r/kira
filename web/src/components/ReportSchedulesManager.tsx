@@ -89,6 +89,27 @@ export default function ReportSchedulesManager() {
     }
   };
 
+  const handleGenerateNow = async (scheduleId: string) => {
+    try {
+      await api.generateReportNow(scheduleId);
+      await load();
+      if (activeScheduleId) {
+        const data = await api.listReportResults(activeScheduleId);
+        setResults(data.results);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate report");
+    }
+  };
+
+  const handleDownloadResult = async (resultId: string) => {
+    try {
+      await api.downloadReportResult(resultId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to download report");
+    }
+  };
+
   if (loading) return <Skeleton className="h-64 w-full" />;
 
   return (
@@ -109,7 +130,7 @@ export default function ReportSchedulesManager() {
               <th className="text-left pb-2">Format</th>
               <th className="text-left pb-2">Enabled</th>
               <th className="text-left pb-2">Last Run</th>
-              <th className="text-right pb-2 w-32">Actions</th>
+              <th className="text-right pb-2 w-48">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -121,6 +142,7 @@ export default function ReportSchedulesManager() {
                 <td className="py-2 text-slate-300">{s.enabled ? "Yes" : "No"}</td>
                 <td className="py-2 text-slate-500 text-[11px]">{s.last_run ? new Date(s.last_run).toLocaleString() : "—"}</td>
                 <td className="py-2 text-right">
+                  <Button size="sm" onClick={(e) => { e.stopPropagation(); handleGenerateNow(s.id); }}>Generate Now</Button>
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); handleDelete(s.id); }} variant="danger">Delete</Button>
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); setEditing(s); setForm({ id: s.id, name: s.name, description: s.description || "", cron_expression: s.cron_expression, format: s.format, filters: s.filters, recipients: s.recipients, enabled: s.enabled }); setOpen(true); }} variant="secondary">Edit</Button>
                 </td>
@@ -137,7 +159,10 @@ export default function ReportSchedulesManager() {
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-100">Report Results</h3>
-            <Button size="sm" onClick={() => { setActiveScheduleId(null); setResults([]); }}>Back</Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => handleGenerateNow(activeScheduleId!)}>Generate Now</Button>
+              <Button size="sm" onClick={() => { setActiveScheduleId(null); setResults([]); }}>Back</Button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -148,6 +173,7 @@ export default function ReportSchedulesManager() {
                   <th className="text-right pb-2">Rows</th>
                   <th className="text-left pb-2">Generated</th>
                   <th className="text-right pb-2 w-20">Error</th>
+                  <th className="text-right pb-2 w-20">Download</th>
                 </tr>
               </thead>
               <tbody>
@@ -160,10 +186,17 @@ export default function ReportSchedulesManager() {
                     <td className="py-2 text-right">
                       {r.error_message ? <span className="text-rose-400 text-[10px]">{r.error_message}</span> : <span className="text-emerald-400 text-[10px]">OK</span>}
                     </td>
+                    <td className="py-2 text-right">
+                      {r.file_path ? (
+                        <Button size="sm" onClick={() => handleDownloadResult(r.id)}>Download</Button>
+                      ) : (
+                        <span className="text-slate-500 text-[10px]">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {results.length === 0 && (
-                  <tr><td colSpan={5} className="py-4 text-center text-slate-500 text-[11px]">No report results.</td></tr>
+                  <tr><td colSpan={6} className="py-4 text-center text-slate-500 text-[11px]">No report results.</td></tr>
                 )}
               </tbody>
             </table>
