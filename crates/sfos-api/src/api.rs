@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use lettre::Transport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, Store, Tenant};
+use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, Store, Tenant, WebhookDelivery};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
@@ -603,6 +603,7 @@ pub struct CreateAlertRule {
     pub severity: Option<String>,
     pub cooldown_minutes: Option<i32>,
     pub enabled: Option<bool>,
+    pub webhook_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -614,6 +615,7 @@ pub struct UpdateAlertRule {
     pub severity: Option<String>,
     pub cooldown_minutes: Option<i32>,
     pub enabled: Option<bool>,
+    pub webhook_url: Option<Option<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -627,6 +629,7 @@ pub struct AlertRuleResponse {
     pub severity: String,
     pub cooldown_minutes: i32,
     pub enabled: bool,
+    pub webhook_url: Option<String>,
     pub last_triggered: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -1153,6 +1156,44 @@ fn send_email(
     Ok(())
 }
 
+async fn send_webhook(
+    state: &AppState,
+    url: &str,
+    rule_name: &str,
+    message: &str,
+    severity: &str,
+    triggered_at: DateTime<Utc>,
+) -> Result<(), ApiError> {
+    let payload = serde_json::json!({
+        "rule_name": rule_name,
+        "message": message,
+        "severity": severity,
+        "triggered_at": triggered_at.to_rfc3339(),
+    });
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(url)
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("webhook request failed: {e}")))?;
+
+    let status = res.status().as_u16();
+    let body = res.text().await.unwrap_or_default();
+
+    if status >= 200 && status < 300 {
+        Ok(())
+    } else {
+        Err(ApiError::internal(anyhow::anyhow!(
+            "webhook returned status {}: {}",
+            status,
+            body
+        )))
+    }
+}
+
 // Report schedule handlers
 pub async fn list_report_schedules(
     State(state): State<AppState>,
@@ -1321,6 +1362,7 @@ pub async fn list_alert_rules(
             severity: r.severity.clone(),
             cooldown_minutes: r.cooldown_minutes,
             enabled: r.enabled,
+            webhook_url: r.webhook_url.clone(),
             last_triggered: r.last_triggered,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -1349,6 +1391,7 @@ pub async fn create_alert_rule(
         severity: payload.severity.unwrap_or("medium".to_string()),
         cooldown_minutes: payload.cooldown_minutes.unwrap_or(60),
         enabled: payload.enabled.unwrap_or(true),
+        webhook_url: payload.webhook_url,
         last_triggered: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -1365,6 +1408,7 @@ pub async fn create_alert_rule(
             severity: created.severity,
             cooldown_minutes: created.cooldown_minutes,
             enabled: created.enabled,
+            webhook_url: created.webhook_url,
             last_triggered: created.last_triggered,
             created_at: created.created_at,
             updated_at: created.updated_at,
@@ -1389,6 +1433,7 @@ pub async fn update_alert_rule(
         severity: payload.severity.unwrap_or_default(),
         cooldown_minutes: payload.cooldown_minutes.unwrap_or(60),
         enabled: payload.enabled.unwrap_or(true),
+        webhook_url: payload.webhook_url.flatten(),
         last_triggered: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -1406,6 +1451,7 @@ pub async fn update_alert_rule(
                 severity: r.severity,
                 cooldown_minutes: r.cooldown_minutes,
                 enabled: r.enabled,
+                webhook_url: r.webhook_url,
                 last_triggered: r.last_triggered,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
@@ -1463,6 +1509,61 @@ pub async fn acknowledge_alert_instance(
         Ok(Json(json!({"message": "alert acknowledged"})))
     } else {
         Err(ApiError::not_found("alert instance not found or already acknowledged"))
+    }
+}
+
+pub async fn list_webhook_deliveries(
+    State(state): State<AppState>,
+    axum::extract::Path(instance_id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let _ = state.store.list_alert_instances(tenant.id, None).await?;
+    let deliveries = state.store.list_webhook_deliveries(instance_id).await?;
+    Ok(Json(json!({
+        "deliveries": deliveries.iter().map(|d| serde_json::json!({
+            "id": d.id,
+            "alert_instance_id": d.alert_instance_id,
+            "webhook_url": d.webhook_url,
+            "status": d.status,
+            "response_status_code": d.response_status_code,
+            "response_body": d.response_body,
+            "error_message": d.error_message,
+            "delivered_at": d.delivered_at,
+        })).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn test_webhook(
+    State(_state): State<AppState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let url = payload.get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::bad_request("url is required"))?;
+
+    let payload = serde_json::json!({
+        "test": true,
+        "message": "Kira webhook test",
+        "triggered_at": Utc::now().to_rfc3339(),
+    });
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(url)
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("webhook test failed: {e}")))?;
+
+    let status = res.status().as_u16();
+    let body = res.text().await.unwrap_or_default();
+
+    if status >= 200 && status < 300 {
+        Ok(Json(json!({"status": "ok", "code": status, "body": body})))
+    } else {
+        Ok(Json(json!({"status": "error", "code": status, "body": body})))
     }
 }
 
@@ -1734,15 +1835,40 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 id: Uuid::new_v4(),
                 rule_id: rule.id,
                 tenant_id,
-                message,
+                message: message.clone(),
                 severity: rule.severity.clone(),
                 triggered_at: now,
                 acknowledged: false,
                 acknowledged_at: None,
                 acknowledged_by: None,
             };
-            state.store.create_alert_instance(&instance).await?;
+            let created_instance = state.store.create_alert_instance(&instance).await?;
             state.store.update_alert_rule_last_triggered(rule.id, now).await?;
+
+            // Send webhook if configured
+            if let Some(webhook_url) = &rule.webhook_url {
+                let state_clone = state.clone();
+                let instance_id = created_instance.id;
+                let url = webhook_url.clone();
+                let msg = instance.message.clone();
+                let sev = rule.severity.clone();
+                let rname = rule.name.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = send_webhook(&state_clone, &url, &rname, &msg, &sev, now).await {
+                        tracing::error!(webhook_url = %url, %e, "webhook delivery failed");
+                    }
+                    let _ = state_clone.store.create_webhook_delivery(&WebhookDelivery {
+                        id: Uuid::new_v4(),
+                        alert_instance_id: instance_id,
+                        webhook_url: url,
+                        status: "sent".to_string(),
+                        response_status_code: None,
+                        response_body: None,
+                        error_message: None,
+                        delivered_at: now,
+                    }).await;
+                });
+            }
         }
     }
 

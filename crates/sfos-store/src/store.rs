@@ -40,6 +40,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0009_report_schedules",
         include_str!("../migrations/0009_report_schedules.sql"),
     ),
+    (
+        "0010_alert_webhooks",
+        include_str!("../migrations/0010_alert_webhooks.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -92,6 +96,7 @@ pub struct AlertRule {
     pub severity: String,
     pub cooldown_minutes: i32,
     pub enabled: bool,
+    pub webhook_url: Option<String>,
     pub last_triggered: Option<chrono::DateTime<Utc>>,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
@@ -764,9 +769,9 @@ impl Store {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "INSERT INTO alert_rules (tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at",
+                "INSERT INTO alert_rules (tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, webhook_url)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, webhook_url, last_triggered, created_at, updated_at",
                 &[
                     &rule.tenant_id,
                     &rule.name,
@@ -776,6 +781,7 @@ impl Store {
                     &rule.severity,
                     &rule.cooldown_minutes,
                     &rule.enabled,
+                    &rule.webhook_url,
                 ],
             )
             .await?;
@@ -786,7 +792,7 @@ impl Store {
         let client = self.pool.get().await?;
         let rows = client
             .query(
-                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at
+                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, webhook_url, last_triggered, created_at, updated_at
                  FROM alert_rules WHERE tenant_id = $1 ORDER BY created_at DESC",
                 &[&tenant_id],
             )
@@ -799,9 +805,9 @@ impl Store {
         let row = client
             .query_opt(
                 "UPDATE alert_rules
-                 SET name = $2, description = $3, condition_type = $4, threshold = $5, severity = $6, cooldown_minutes = $7, enabled = $8, updated_at = now()
+                 SET name = $2, description = $3, condition_type = $4, threshold = $5, severity = $6, cooldown_minutes = $7, enabled = $8, webhook_url = $9, updated_at = now()
                  WHERE id = $1
-                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at",
+                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, webhook_url, last_triggered, created_at, updated_at",
                 &[
                     &id,
                     &rule.name,
@@ -811,6 +817,7 @@ impl Store {
                     &rule.severity,
                     &rule.cooldown_minutes,
                     &rule.enabled,
+                    &rule.webhook_url,
                 ],
             )
             .await?;
@@ -827,7 +834,7 @@ impl Store {
         let client = self.pool.get().await?;
         let rows = client
             .query(
-                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at
+                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, webhook_url, last_triggered, created_at, updated_at
                  FROM alert_rules WHERE tenant_id = $1 AND enabled",
                 &[&tenant_id],
             )
@@ -1018,6 +1025,7 @@ impl From<&tokio_postgres::Row> for AlertRule {
             severity: row.get("severity"),
             cooldown_minutes: row.get("cooldown_minutes"),
             enabled: row.get("enabled"),
+            webhook_url: row.get("webhook_url"),
             last_triggered: row.get("last_triggered"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
@@ -1038,5 +1046,66 @@ impl From<&tokio_postgres::Row> for AlertInstance {
             acknowledged_at: row.get("acknowledged_at"),
             acknowledged_by: row.get("acknowledged_by"),
         }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WebhookDelivery {
+    pub id: Uuid,
+    pub alert_instance_id: Uuid,
+    pub webhook_url: String,
+    pub status: String,
+    pub response_status_code: Option<i32>,
+    pub response_body: Option<String>,
+    pub error_message: Option<String>,
+    pub delivered_at: chrono::DateTime<Utc>,
+}
+
+impl From<&tokio_postgres::Row> for WebhookDelivery {
+    fn from(row: &tokio_postgres::Row) -> WebhookDelivery {
+        WebhookDelivery {
+            id: row.get("id"),
+            alert_instance_id: row.get("alert_instance_id"),
+            webhook_url: row.get("webhook_url"),
+            status: row.get("status"),
+            response_status_code: row.get("response_status_code"),
+            response_body: row.get("response_body"),
+            error_message: row.get("error_message"),
+            delivered_at: row.get("delivered_at"),
+        }
+    }
+}
+
+impl Store {
+    pub async fn create_webhook_delivery(&self, delivery: &WebhookDelivery) -> Result<WebhookDelivery> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO webhook_deliveries (alert_instance_id, webhook_url, status, response_status_code, response_body, error_message)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, alert_instance_id, webhook_url, status, response_status_code, response_body, error_message, delivered_at",
+                &[
+                    &delivery.alert_instance_id,
+                    &delivery.webhook_url,
+                    &delivery.status,
+                    &delivery.response_status_code,
+                    &delivery.response_body,
+                    &delivery.error_message,
+                ],
+            )
+            .await?;
+        Ok(WebhookDelivery::from(&row))
+    }
+
+    pub async fn list_webhook_deliveries(&self, alert_instance_id: Uuid) -> Result<Vec<WebhookDelivery>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, alert_instance_id, webhook_url, status, response_status_code, response_body, error_message, delivered_at
+                 FROM webhook_deliveries WHERE alert_instance_id = $1 ORDER BY delivered_at DESC",
+                &[&alert_instance_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| WebhookDelivery::from(row)).collect())
     }
 }
