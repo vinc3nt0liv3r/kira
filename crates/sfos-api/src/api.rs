@@ -1697,25 +1697,81 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
             (body.into_bytes(), "text/csv", "csv")
         }
         "pdf" => {
-            // Simple text-based PDF-like output (HTML content with .pdf extension marker)
-            let mut body = String::from("<html><head><title>Kira Report</title></head><body>");
-            body.push_str(&format!("<h1>Kira Security Report</h1><p>Generated: {}</p>", now.to_rfc3339()));
-            body.push_str(&format!("<p>Tenant: {}</p><p>Events: {}</p>", tenant.name, row_count));
-            body.push_str("<table border='1'><tr><th>Time</th><th>Action</th><th>User</th><th>Destination</th><th>Category</th><th>Threat</th></tr>");
-            for row in &rows {
-                let ts: DateTime<Utc> = row.get("ts");
+            // Manual PDF generator (no external deps, Docker-safe)
+            let esc = |s: &str| s.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+
+            let mut content = String::new();
+            content.push_str("BT /F1 14 Tf 72 740 Td (Kira Security Report) Tj ET\n");
+            content.push_str(&format!(
+                "BT /F1 10 Tf 72 720 Td ({}) Tj ET\n",
+                esc(&format!("Tenant: {}", tenant.name))
+            ));
+            content.push_str(&format!(
+                "BT /F1 10 Tf 72 705 Td ({}) Tj ET\n",
+                esc(&format!("Events: {}  Generated: {}", row_count, now.to_rfc3339()))
+            ));
+
+            let mut y = 685;
+            for row in rows.iter().take(45) {
+                let ts: chrono::DateTime<Utc> = row.get("ts");
                 let action: Option<String> = row.get("action");
                 let user: Option<String> = row.get("display_user");
                 let destination: Option<String> = row.get("destination");
                 let category: Option<String> = row.get("category");
                 let threat: Option<String> = row.get("threat_name");
-                body.push_str(&format!(
-                    "<tr><td>{}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td></tr>",
-                    ts.to_rfc3339(), action, user, destination, category, threat
+
+                content.push_str(&format!(
+                    "BT /F1 8 Tf 72 {} Td ({} | {} | {} | {} | {} | {}) Tj ET\n",
+                    y,
+                    esc(&ts.format("%H:%M:%S").to_string()),
+                    esc(&action.unwrap_or_default()),
+                    esc(&user.unwrap_or_default()),
+                    esc(&destination.unwrap_or_default()),
+                    esc(&category.unwrap_or_default()),
+                    esc(&threat.unwrap_or_default()),
                 ));
+                y -= 11;
             }
-            body.push_str("</table></body></html>");
-            (body.into_bytes(), "text/html", "pdf")
+
+            let content_bytes = content.as_bytes();
+            let content_len = content_bytes.len();
+
+            let mut pdf = Vec::new();
+            pdf.extend_from_slice(b"%PDF-1.4\n");
+
+            let off1 = pdf.len();
+            pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+            let off2 = pdf.len();
+            pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>\nendobj\n");
+
+            let off3 = pdf.len();
+            pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
+
+            let off4 = pdf.len();
+            pdf.extend_from_slice(b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+
+            let off5 = pdf.len();
+            pdf.extend_from_slice(b"5 0 obj\n<< /Length ");
+            pdf.extend_from_slice(content_len.to_string().as_bytes());
+            pdf.extend_from_slice(b">>\nstream\n");
+            pdf.extend_from_slice(content_bytes);
+            pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+            let xref_offset = pdf.len();
+            pdf.extend_from_slice(b"xref\n0 6\n");
+            pdf.extend_from_slice(b"0000000000 65535 f \n");
+            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off1).as_bytes());
+            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off2).as_bytes());
+            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off3).as_bytes());
+            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off4).as_bytes());
+            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off5).as_bytes());
+
+            pdf.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n");
+            pdf.extend_from_slice(xref_offset.to_string().as_bytes());
+            pdf.extend_from_slice(b"\n%%EOF\n");
+
+            (pdf, "application/pdf", "pdf")
         }
         _ => return Err(ApiError::bad_request("unsupported format")),
     };
