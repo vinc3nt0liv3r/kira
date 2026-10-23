@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use futures_util::SinkExt;
+use serde::Serialize;
 use sfos_core::Event;
 use tokio_postgres::NoTls;
 use uuid::Uuid;
@@ -36,6 +37,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0008_global_retention",
         include_str!("../migrations/0008_global_retention.sql"),
     ),
+    (
+        "0009_report_schedules",
+        include_str!("../migrations/0009_report_schedules.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -46,6 +51,64 @@ pub struct Tenant {
     pub name: String,
     pub is_default: bool,
     pub retention_days: i32,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReportSchedule {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub cron_schedule: String,
+    pub format: String,
+    pub recipients: serde_json::Value,
+    pub filters: serde_json::Value,
+    pub enabled: bool,
+    pub last_run: Option<chrono::DateTime<Utc>>,
+    pub next_run: Option<chrono::DateTime<Utc>>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub updated_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReportResult {
+    pub id: Uuid,
+    pub schedule_id: Uuid,
+    pub status: String,
+    pub file_path: Option<String>,
+    pub row_count: i64,
+    pub error_message: Option<String>,
+    pub generated_at: chrono::DateTime<Utc>,
+    pub sent_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AlertRule {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub condition_type: String,
+    pub threshold: String,
+    pub severity: String,
+    pub cooldown_minutes: i32,
+    pub enabled: bool,
+    pub last_triggered: Option<chrono::DateTime<Utc>>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub updated_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AlertInstance {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub tenant_id: Uuid,
+    pub message: String,
+    pub severity: String,
+    pub triggered_at: chrono::DateTime<Utc>,
+    pub acknowledged: bool,
+    pub acknowledged_at: Option<chrono::DateTime<Utc>>,
+    pub acknowledged_by: Option<String>,
 }
 
 #[derive(Clone)]
@@ -564,6 +627,277 @@ impl Store {
         Ok(deleted)
     }
 
+    // Report schedule CRUD
+    pub async fn create_report_schedule(&self, schedule: &ReportSchedule) -> Result<ReportSchedule> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO report_schedules (tenant_id, name, description, cron_schedule, format, recipients, filters, enabled)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at",
+                &[
+                    &schedule.tenant_id,
+                    &schedule.name,
+                    &schedule.description,
+                    &schedule.cron_schedule,
+                    &schedule.format,
+                    &schedule.recipients,
+                    &schedule.filters,
+                    &schedule.enabled,
+                ],
+            )
+            .await?;
+        Ok(ReportSchedule::from(&row))
+    }
+
+    pub async fn list_report_schedules(&self, tenant_id: Uuid) -> Result<Vec<ReportSchedule>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at
+                 FROM report_schedules WHERE tenant_id = $1 ORDER BY created_at DESC",
+                &[&tenant_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
+    }
+
+    pub async fn update_report_schedule(&self, id: Uuid, schedule: &ReportSchedule) -> Result<Option<ReportSchedule>> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt(
+                "UPDATE report_schedules
+                 SET name = $2, description = $3, cron_schedule = $4, format = $5, recipients = $6, filters = $7, enabled = $8, updated_at = now()
+                 WHERE id = $1
+                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at",
+                &[
+                    &id,
+                    &schedule.name,
+                    &schedule.description,
+                    &schedule.cron_schedule,
+                    &schedule.format,
+                    &schedule.recipients,
+                    &schedule.filters,
+                    &schedule.enabled,
+                ],
+            )
+            .await?;
+        Ok(row.map(|row| ReportSchedule::from(&row)))
+    }
+
+    pub async fn delete_report_schedule(&self, id: Uuid) -> Result<bool> {
+        let client = self.pool.get().await?;
+        let deleted = client
+            .execute("DELETE FROM report_schedules WHERE id = $1", &[&id])
+            .await?;
+        Ok(deleted > 0)
+    }
+
+    pub async fn get_due_report_schedules(&self, now: chrono::DateTime<Utc>) -> Result<Vec<ReportSchedule>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at
+                 FROM report_schedules
+                 WHERE enabled AND (next_run IS NULL OR next_run <= $1)",
+                &[&now],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
+    }
+
+    pub async fn update_report_schedule_run(&self, id: Uuid, last_run: chrono::DateTime<Utc>, next_run: chrono::DateTime<Utc>) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE report_schedules SET last_run = $2, next_run = $3, updated_at = now() WHERE id = $1",
+                &[&id, &last_run, &next_run],
+            )
+            .await?;
+        Ok(())
+    }
+
+    // Report result CRUD
+    pub async fn create_report_result(&self, result: &ReportResult) -> Result<ReportResult> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO report_results (schedule_id, status, file_path, row_count, error_message)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, schedule_id, status, file_path, row_count, error_message, generated_at, sent_at",
+                &[
+                    &result.schedule_id,
+                    &result.status,
+                    &result.file_path,
+                    &result.row_count,
+                    &result.error_message,
+                ],
+            )
+            .await?;
+        Ok(ReportResult::from(&row))
+    }
+
+    pub async fn list_report_results(&self, schedule_id: Uuid) -> Result<Vec<ReportResult>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, schedule_id, status, file_path, row_count, error_message, generated_at, sent_at
+                 FROM report_results WHERE schedule_id = $1 ORDER BY generated_at DESC",
+                &[&schedule_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| ReportResult::from(row)).collect())
+    }
+
+    pub async fn mark_report_result_sent(&self, id: Uuid) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE report_results SET status = 'sent', sent_at = now() WHERE id = $1",
+                &[&id],
+            )
+            .await?;
+        Ok(())
+    }
+
+    // Alert rule CRUD
+    pub async fn create_alert_rule(&self, rule: &AlertRule) -> Result<AlertRule> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO alert_rules (tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at",
+                &[
+                    &rule.tenant_id,
+                    &rule.name,
+                    &rule.description,
+                    &rule.condition_type,
+                    &rule.threshold,
+                    &rule.severity,
+                    &rule.cooldown_minutes,
+                    &rule.enabled,
+                ],
+            )
+            .await?;
+        Ok(AlertRule::from(&row))
+    }
+
+    pub async fn list_alert_rules(&self, tenant_id: Uuid) -> Result<Vec<AlertRule>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at
+                 FROM alert_rules WHERE tenant_id = $1 ORDER BY created_at DESC",
+                &[&tenant_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| AlertRule::from(row)).collect())
+    }
+
+    pub async fn update_alert_rule(&self, id: Uuid, rule: &AlertRule) -> Result<Option<AlertRule>> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt(
+                "UPDATE alert_rules
+                 SET name = $2, description = $3, condition_type = $4, threshold = $5, severity = $6, cooldown_minutes = $7, enabled = $8, updated_at = now()
+                 WHERE id = $1
+                 RETURNING id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at",
+                &[
+                    &id,
+                    &rule.name,
+                    &rule.description,
+                    &rule.condition_type,
+                    &rule.threshold,
+                    &rule.severity,
+                    &rule.cooldown_minutes,
+                    &rule.enabled,
+                ],
+            )
+            .await?;
+        Ok(row.map(|row| AlertRule::from(&row)))
+    }
+
+    pub async fn delete_alert_rule(&self, id: Uuid) -> Result<bool> {
+        let client = self.pool.get().await?;
+        let deleted = client.execute("DELETE FROM alert_rules WHERE id = $1", &[&id]).await?;
+        Ok(deleted > 0)
+    }
+
+    pub async fn get_enabled_alert_rules(&self, tenant_id: Uuid) -> Result<Vec<AlertRule>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, tenant_id, name, description, condition_type, threshold, severity, cooldown_minutes, enabled, last_triggered, created_at, updated_at
+                 FROM alert_rules WHERE tenant_id = $1 AND enabled",
+                &[&tenant_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| AlertRule::from(row)).collect())
+    }
+
+    pub async fn update_alert_rule_last_triggered(&self, id: Uuid, triggered_at: chrono::DateTime<Utc>) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE alert_rules SET last_triggered = $2, updated_at = now() WHERE id = $1",
+                &[&id, &triggered_at],
+            )
+            .await?;
+        Ok(())
+    }
+
+    // Alert instance CRUD
+    pub async fn create_alert_instance(&self, instance: &AlertInstance) -> Result<AlertInstance> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO alert_instances (rule_id, tenant_id, message, severity)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, rule_id, tenant_id, message, severity, triggered_at, acknowledged, acknowledged_at, acknowledged_by",
+                &[
+                    &instance.rule_id,
+                    &instance.tenant_id,
+                    &instance.message,
+                    &instance.severity,
+                ],
+            )
+            .await?;
+        Ok(AlertInstance::from(&row))
+    }
+
+    pub async fn list_alert_instances(&self, tenant_id: Uuid, acknowledged: Option<bool>) -> Result<Vec<AlertInstance>> {
+        let client = self.pool.get().await?;
+        let rows = match acknowledged {
+            Some(ack) => client
+                .query(
+                    "SELECT id, rule_id, tenant_id, message, severity, triggered_at, acknowledged, acknowledged_at, acknowledged_by
+                     FROM alert_instances WHERE tenant_id = $1 AND acknowledged = $2 ORDER BY triggered_at DESC",
+                    &[&tenant_id, &ack],
+                )
+                .await?,
+            None => client
+                .query(
+                    "SELECT id, rule_id, tenant_id, message, severity, triggered_at, acknowledged, acknowledged_at, acknowledged_by
+                     FROM alert_instances WHERE tenant_id = $1 ORDER BY triggered_at DESC",
+                    &[&tenant_id],
+                )
+                .await?,
+        };
+        Ok(rows.iter().map(|row| AlertInstance::from(row)).collect())
+    }
+
+    pub async fn acknowledge_alert_instance(&self, id: Uuid, acknowledged_by: &str) -> Result<bool> {
+        let client = self.pool.get().await?;
+        let updated = client
+            .execute(
+                "UPDATE alert_instances SET acknowledged = true, acknowledged_at = now(), acknowledged_by = $2 WHERE id = $1 AND NOT acknowledged",
+                &[&id, &acknowledged_by],
+            )
+            .await?;
+        Ok(updated > 0)
+    }
+
     pub async fn last_event_at(&self, tenant_id: Uuid) -> Result<Option<DateTime<Utc>>> {
         let client = self.pool.get().await?;
         let row = client
@@ -635,5 +969,75 @@ fn row_to_tenant(row: &tokio_postgres::Row) -> Tenant {
         name: row.get("name"),
         is_default: row.get("is_default"),
         retention_days: row.get("retention_days"),
+    }
+}
+
+impl From<&tokio_postgres::Row> for ReportSchedule {
+    fn from(row: &tokio_postgres::Row) -> ReportSchedule {
+        ReportSchedule {
+            id: row.get("id"),
+            tenant_id: row.get("tenant_id"),
+            name: row.get("name"),
+            description: row.get("description"),
+            cron_schedule: row.get("cron_schedule"),
+            format: row.get("format"),
+            recipients: row.get("recipients"),
+            filters: row.get("filters"),
+            enabled: row.get("enabled"),
+            last_run: row.get("last_run"),
+            next_run: row.get("next_run"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+}
+
+impl From<&tokio_postgres::Row> for ReportResult {
+    fn from(row: &tokio_postgres::Row) -> ReportResult {
+        ReportResult {
+            id: row.get("id"),
+            schedule_id: row.get("schedule_id"),
+            status: row.get("status"),
+            file_path: row.get("file_path"),
+            row_count: row.get("row_count"),
+            error_message: row.get("error_message"),
+            generated_at: row.get("generated_at"),
+            sent_at: row.get("sent_at"),
+        }
+    }
+}
+
+impl From<&tokio_postgres::Row> for AlertRule {
+    fn from(row: &tokio_postgres::Row) -> AlertRule {
+        AlertRule {
+            id: row.get("id"),
+            tenant_id: row.get("tenant_id"),
+            name: row.get("name"),
+            description: row.get("description"),
+            condition_type: row.get("condition_type"),
+            threshold: row.get("threshold"),
+            severity: row.get("severity"),
+            cooldown_minutes: row.get("cooldown_minutes"),
+            enabled: row.get("enabled"),
+            last_triggered: row.get("last_triggered"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+}
+
+impl From<&tokio_postgres::Row> for AlertInstance {
+    fn from(row: &tokio_postgres::Row) -> AlertInstance {
+        AlertInstance {
+            id: row.get("id"),
+            rule_id: row.get("rule_id"),
+            tenant_id: row.get("tenant_id"),
+            message: row.get("message"),
+            severity: row.get("severity"),
+            triggered_at: row.get("triggered_at"),
+            acknowledged: row.get("acknowledged"),
+            acknowledged_at: row.get("acknowledged_at"),
+            acknowledged_by: row.get("acknowledged_by"),
+        }
     }
 }

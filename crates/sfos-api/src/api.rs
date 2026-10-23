@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, str::FromStr};
 
 use anyhow::Context;
 use axum::extract::{Query, State};
@@ -6,10 +6,13 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
+use lettre::message::SinglePart;
+use lettre::Transport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sfos_store::{Store, Tenant};
+use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, Store, Tenant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use uuid::Uuid;
 
 use crate::query::{RangeQuery, TimeRange};
 
@@ -19,6 +22,11 @@ pub struct AppState {
     pub default_slug: Option<String>,
     pub retention_admin_token: Option<Arc<str>>,
     pub query_semaphore: Arc<Semaphore>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from: Option<String>,
 }
 
 #[derive(Debug)]
@@ -97,6 +105,12 @@ impl From<tokio_postgres::Error> for ApiError {
 impl From<deadpool_postgres::PoolError> for ApiError {
     fn from(err: deadpool_postgres::PoolError) -> Self {
         Self::internal(err.into())
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
     }
 }
 
@@ -526,6 +540,115 @@ struct TopRow {
     blocked: i64,
     bytes: i64,
     users: Option<i64>,
+}
+
+// Report request/response types
+#[derive(Debug, Deserialize)]
+pub struct CreateReportSchedule {
+    pub name: String,
+    pub description: Option<String>,
+    pub cron_schedule: String,
+    pub format: String,
+    pub recipients: serde_json::Value,
+    pub filters: serde_json::Value,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateReportSchedule {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub cron_schedule: Option<String>,
+    pub format: Option<String>,
+    pub recipients: Option<serde_json::Value>,
+    pub filters: Option<serde_json::Value>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReportScheduleResponse {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub cron_schedule: String,
+    pub format: String,
+    pub recipients: serde_json::Value,
+    pub filters: serde_json::Value,
+    pub enabled: bool,
+    pub last_run: Option<DateTime<Utc>>,
+    pub next_run: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReportResultResponse {
+    pub id: Uuid,
+    pub schedule_id: Uuid,
+    pub status: String,
+    pub file_path: Option<String>,
+    pub row_count: i64,
+    pub error_message: Option<String>,
+    pub generated_at: DateTime<Utc>,
+    pub sent_at: Option<DateTime<Utc>>,
+}
+
+// Alert request/response types
+#[derive(Debug, Deserialize)]
+pub struct CreateAlertRule {
+    pub name: String,
+    pub description: Option<String>,
+    pub condition_type: String,
+    pub threshold: String,
+    pub severity: Option<String>,
+    pub cooldown_minutes: Option<i32>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateAlertRule {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub condition_type: Option<String>,
+    pub threshold: Option<String>,
+    pub severity: Option<String>,
+    pub cooldown_minutes: Option<i32>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlertRuleResponse {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub condition_type: String,
+    pub threshold: String,
+    pub severity: String,
+    pub cooldown_minutes: i32,
+    pub enabled: bool,
+    pub last_triggered: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlertInstanceResponse {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub tenant_id: Uuid,
+    pub message: String,
+    pub severity: String,
+    pub triggered_at: DateTime<Utc>,
+    pub acknowledged: bool,
+    pub acknowledged_at: Option<DateTime<Utc>>,
+    pub acknowledged_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AcknowledgeAlert {
+    pub acknowledged_by: String,
 }
 
 pub async fn top(
@@ -985,8 +1108,649 @@ fn csv_escape(value: String) -> String {
     }
 }
 
+fn send_email(
+    state: &AppState,
+    to: &[String],
+    subject: &str,
+    body: &str,
+) -> Result<(), ApiError> {
+    let Some(host) = &state.smtp_host else {
+        return Err(ApiError::unavailable("SMTP not configured"));
+    };
+    let port = state.smtp_port.unwrap_or(587);
+    let username = match &state.smtp_username {
+        Some(u) => u.clone(),
+        None => return Err(ApiError::unavailable("SMTP username not configured")),
+    };
+    let password = match &state.smtp_password {
+        Some(p) => p.clone(),
+        None => return Err(ApiError::unavailable("SMTP password not configured")),
+    };
+    let from = match &state.smtp_from {
+        Some(f) => f.clone(),
+        None => return Err(ApiError::unavailable("SMTP from address not configured")),
+    };
+
+    let email = lettre::message::Message::builder()
+        .from(from.parse().map_err(|_| ApiError::bad_request("invalid from address"))?)
+        .to(to[0].parse().map_err(|_| ApiError::bad_request("invalid to address"))?)
+        .subject(subject)
+        .singlepart(
+            lettre::message::SinglePart::builder()
+                .body(body.to_string()),
+        )
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build email: {e}")))?;
+
+    let mailer = lettre::SmtpTransport::relay(host)
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to create SMTP transport: {e}")))?
+        .port(port)
+        .credentials(lettre::transport::smtp::authentication::Credentials::new(username, password))
+        .build();
+
+    mailer.send(&email).map_err(|e| {
+        ApiError::internal(anyhow::anyhow!("failed to send email: {e}"))
+    })?;
+
+    Ok(())
+}
+
+// Report schedule handlers
+pub async fn list_report_schedules(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let schedules = state.store.list_report_schedules(tenant.id).await?;
+    Ok(Json(json!({
+        "schedules": schedules.iter().map(|s| ReportScheduleResponse {
+            id: s.id,
+            tenant_id: s.tenant_id,
+            name: s.name.clone(),
+            description: s.description.clone(),
+            cron_schedule: s.cron_schedule.clone(),
+            format: s.format.clone(),
+            recipients: s.recipients.clone(),
+            filters: s.filters.clone(),
+            enabled: s.enabled,
+            last_run: s.last_run,
+            next_run: s.next_run,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+        }).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn create_report_schedule(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateReportSchedule>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    if !["csv", "pdf"].contains(&payload.format.as_str()) {
+        return Err(ApiError::bad_request("format must be csv or pdf"));
+    }
+    let schedule = ReportSchedule {
+        id: Uuid::new_v4(),
+        tenant_id: tenant.id,
+        name: payload.name,
+        description: payload.description,
+        cron_schedule: payload.cron_schedule,
+        format: payload.format,
+        recipients: payload.recipients,
+        filters: payload.filters,
+        enabled: payload.enabled.unwrap_or(true),
+        last_run: None,
+        next_run: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let created = state.store.create_report_schedule(&schedule).await?;
+    Ok(Json(json!({
+        "schedule": ReportScheduleResponse {
+            id: created.id,
+            tenant_id: created.tenant_id,
+            name: created.name,
+            description: created.description,
+            cron_schedule: created.cron_schedule,
+            format: created.format,
+            recipients: created.recipients,
+            filters: created.filters,
+            enabled: created.enabled,
+            last_run: created.last_run,
+            next_run: created.next_run,
+            created_at: created.created_at,
+            updated_at: created.updated_at,
+        }
+    })))
+}
+
+pub async fn update_report_schedule(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Json(payload): Json<UpdateReportSchedule>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    // Verify schedule exists and belongs to tenant
+    let _ = state.store.list_report_schedules(tenant.id).await?;
+    let schedule = ReportSchedule {
+        id,
+        tenant_id: tenant.id,
+        name: payload.name.unwrap_or_default(),
+        description: payload.description.flatten(),
+        cron_schedule: payload.cron_schedule.unwrap_or_default(),
+        format: payload.format.unwrap_or_default(),
+        recipients: payload.recipients.unwrap_or(serde_json::json!([])),
+        filters: payload.filters.unwrap_or(serde_json::json!({})),
+        enabled: payload.enabled.unwrap_or(true),
+        last_run: None,
+        next_run: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let updated = state.store.update_report_schedule(id, &schedule).await?;
+    match updated {
+        Some(s) => Ok(Json(json!({
+            "schedule": ReportScheduleResponse {
+                id: s.id,
+                tenant_id: s.tenant_id,
+                name: s.name,
+                description: s.description,
+                cron_schedule: s.cron_schedule,
+                format: s.format,
+                recipients: s.recipients,
+                filters: s.filters,
+                enabled: s.enabled,
+                last_run: s.last_run,
+                next_run: s.next_run,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+            }
+        }))),
+        None => Err(ApiError::not_found("report schedule not found")),
+    }
+}
+
+pub async fn delete_report_schedule(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let _ = state.store.list_report_schedules(tenant.id).await?;
+    let deleted = state.store.delete_report_schedule(id).await?;
+    if deleted {
+        Ok(Json(json!({"message": "report schedule deleted"})))
+    } else {
+        Err(ApiError::not_found("report schedule not found"))
+    }
+}
+
+pub async fn list_report_results(
+    State(state): State<AppState>,
+    axum::extract::Path(schedule_id): axum::extract::Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let _ = state.store.list_report_schedules(tenant.id).await?;
+    let results = state.store.list_report_results(schedule_id).await?;
+    Ok(Json(json!({
+        "results": results.iter().map(|r| ReportResultResponse {
+            id: r.id,
+            schedule_id: r.schedule_id,
+            status: r.status.clone(),
+            file_path: r.file_path.clone(),
+            row_count: r.row_count,
+            error_message: r.error_message.clone(),
+            generated_at: r.generated_at,
+            sent_at: r.sent_at,
+        }).collect::<Vec<_>>()
+    })))
+}
+
+// Alert rule handlers
+pub async fn list_alert_rules(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let rules = state.store.get_enabled_alert_rules(tenant.id).await?;
+    Ok(Json(json!({
+        "rules": rules.iter().map(|r| AlertRuleResponse {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            name: r.name.clone(),
+            description: r.description.clone(),
+            condition_type: r.condition_type.clone(),
+            threshold: r.threshold.clone(),
+            severity: r.severity.clone(),
+            cooldown_minutes: r.cooldown_minutes,
+            enabled: r.enabled,
+            last_triggered: r.last_triggered,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn create_alert_rule(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateAlertRule>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    if !["threat", "blocked_category", "large_transfer"].contains(&payload.condition_type.as_str()) {
+        return Err(ApiError::bad_request("condition_type must be threat, blocked_category, or large_transfer"));
+    }
+    if !["low", "medium", "high", "critical"].contains(&payload.severity.as_deref().unwrap_or("medium")) {
+        return Err(ApiError::bad_request("severity must be low, medium, high, or critical"));
+    }
+    let rule = AlertRule {
+        id: Uuid::new_v4(),
+        tenant_id: tenant.id,
+        name: payload.name,
+        description: payload.description,
+        condition_type: payload.condition_type,
+        threshold: payload.threshold,
+        severity: payload.severity.unwrap_or("medium".to_string()),
+        cooldown_minutes: payload.cooldown_minutes.unwrap_or(60),
+        enabled: payload.enabled.unwrap_or(true),
+        last_triggered: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let created = state.store.create_alert_rule(&rule).await?;
+    Ok(Json(json!({
+        "rule": AlertRuleResponse {
+            id: created.id,
+            tenant_id: created.tenant_id,
+            name: created.name,
+            description: created.description,
+            condition_type: created.condition_type,
+            threshold: created.threshold,
+            severity: created.severity,
+            cooldown_minutes: created.cooldown_minutes,
+            enabled: created.enabled,
+            last_triggered: created.last_triggered,
+            created_at: created.created_at,
+            updated_at: created.updated_at,
+        }
+    })))
+}
+
+pub async fn update_alert_rule(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Json(payload): Json<UpdateAlertRule>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let _ = state.store.list_alert_rules(tenant.id).await?;
+    let rule = AlertRule {
+        id,
+        tenant_id: tenant.id,
+        name: payload.name.unwrap_or_default(),
+        description: payload.description.flatten(),
+        condition_type: payload.condition_type.unwrap_or_default(),
+        threshold: payload.threshold.unwrap_or_default(),
+        severity: payload.severity.unwrap_or_default(),
+        cooldown_minutes: payload.cooldown_minutes.unwrap_or(60),
+        enabled: payload.enabled.unwrap_or(true),
+        last_triggered: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let updated = state.store.update_alert_rule(id, &rule).await?;
+    match updated {
+        Some(r) => Ok(Json(json!({
+            "rule": AlertRuleResponse {
+                id: r.id,
+                tenant_id: r.tenant_id,
+                name: r.name,
+                description: r.description,
+                condition_type: r.condition_type,
+                threshold: r.threshold,
+                severity: r.severity,
+                cooldown_minutes: r.cooldown_minutes,
+                enabled: r.enabled,
+                last_triggered: r.last_triggered,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }
+        }))),
+        None => Err(ApiError::not_found("alert rule not found")),
+    }
+}
+
+pub async fn delete_alert_rule(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let _ = state.store.list_alert_rules(tenant.id).await?;
+    let deleted = state.store.delete_alert_rule(id).await?;
+    if deleted {
+        Ok(Json(json!({"message": "alert rule deleted"})))
+    } else {
+        Err(ApiError::not_found("alert rule not found"))
+    }
+}
+
+pub async fn list_alert_instances(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let acknowledged = query.get("acknowledged").and_then(|v| v.as_bool());
+    let instances = state.store.list_alert_instances(tenant.id, acknowledged).await?;
+    Ok(Json(json!({
+        "instances": instances.iter().map(|i| AlertInstanceResponse {
+            id: i.id,
+            rule_id: i.rule_id,
+            tenant_id: i.tenant_id,
+            message: i.message.clone(),
+            severity: i.severity.clone(),
+            triggered_at: i.triggered_at,
+            acknowledged: i.acknowledged,
+            acknowledged_at: i.acknowledged_at,
+            acknowledged_by: i.acknowledged_by.clone(),
+        }).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn acknowledge_alert_instance(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Json(payload): Json<AcknowledgeAlert>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, None).await?;
+    let _ = state.store.list_alert_instances(tenant.id, None).await?;
+    let acked = state.store.acknowledge_alert_instance(id, &payload.acknowledged_by).await?;
+    if acked {
+        Ok(Json(json!({"message": "alert acknowledged"})))
+    } else {
+        Err(ApiError::not_found("alert instance not found or already acknowledged"))
+    }
+}
+
+pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedule, now: DateTime<Utc>) -> Result<(), ApiError> {
+    let tenant = state.store.tenant_by_slug("default").await?
+        .ok_or_else(|| ApiError::not_found("default tenant not found"))?;
+
+    // Parse filters
+    let filters = &schedule.filters;
+    let from = filters.get("from").and_then(|v| v.as_str()).unwrap_or("24h");
+    let to = filters.get("to").and_then(|v| v.as_str()).unwrap_or("now");
+
+    // Resolve time range
+    let range = RangeQuery {
+        tenant: Some(tenant.slug.clone()),
+        from: Some(from.to_string()),
+        to: Some(to.to_string()),
+        interval: None,
+    }.resolve(now).map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
+
+    // Get events
+    let q = filters.get("q").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let action = filters.get("action").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let group = filters.get("group").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let user = filters.get("user").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let category = filters.get("category").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let device = filters.get("device").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    let client = state.store.pool().get().await?;
+    let rows = client
+        .query(
+            "SELECT ts, log_type, log_component, category_group, action, COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
+                    COALESCE(domain, host(dst_ip)::text) AS destination, application, category,
+                    COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type,
+                    url, host(src_ip)::text AS src_ip, host(dst_ip)::text AS dst_ip, fw_rule_name,
+                    sent_bytes, recv_bytes, threat_name, message, device_name
+             FROM events
+             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
+               AND ($4::text IS NULL OR display_user ILIKE '%' || $4 || '%'
+                    OR domain ILIKE '%' || $4 || '%'
+                    OR url ILIKE '%' || $4 || '%'
+                    OR message ILIKE '%' || $4 || '%'
+                    OR threat_name ILIKE '%' || $4 || '%'
+                    OR category ILIKE '%' || $4 || '%'
+                    OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $4 || '%'
+                    OR fw_rule_name ILIKE '%' || $4 || '%'
+                    OR host(src_ip) = $4)
+               AND ($5::text IS NULL OR action = $5)
+               AND ($6::text IS NULL OR category_group = $6)
+               AND ($9::text IS NULL OR display_user ILIKE '%' || $9 || '%')
+               AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
+                    OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
+               AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%')
+             ORDER BY ts ASC
+             LIMIT 100000",
+            &[
+                &tenant.id, &range.from, &range.to, &q, &action, &group,
+                &user, &category, &device,
+            ],
+        )
+        .await?;
+
+    let row_count = rows.len() as i64;
+
+    // Generate content
+    let (content, content_type, extension) = match schedule.format.as_str() {
+        "csv" => {
+            let mut body = String::from("timestamp,log_type,log_component,group,action,user,destination,application,category,category_type,url,src_ip,dst_ip,policy,bytes_up,bytes_down,threat,message,device\n");
+            for row in &rows {
+                let ts: DateTime<Utc> = row.get("ts");
+                let log_type: String = row.get("log_type");
+                let log_component: Option<String> = row.get("log_component");
+                let group: String = row.get("group");
+                let action: Option<String> = row.get("action");
+                let user: Option<String> = row.get("display_user");
+                let destination: Option<String> = row.get("destination");
+                let application: Option<String> = row.get("application");
+                let category: Option<String> = row.get("category");
+                let category_type: Option<String> = row.get("category_type");
+                let url: Option<String> = row.get("url");
+                let src_ip: Option<String> = row.get("src_ip");
+                let dst_ip: Option<String> = row.get("dst_ip");
+                let policy: Option<String> = row.get("fw_rule_name");
+                let bytes_up: Option<i64> = row.get("sent_bytes");
+                let bytes_down: Option<i64> = row.get("recv_bytes");
+                let threat: Option<String> = row.get("threat_name");
+                let message: Option<String> = row.get("message");
+                let device: Option<String> = row.get("device_name");
+
+                let mut line = String::new();
+                line.push_str(&csv_escape(ts.to_rfc3339()));
+                line.push(',');
+                line.push_str(&csv_escape(log_type));
+                line.push(',');
+                line.push_str(&csv_escape(log_component.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(group));
+                line.push(',');
+                line.push_str(&csv_escape(action.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(user.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(destination.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(application.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(category.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(category_type.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(url.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(src_ip.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(dst_ip.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(policy.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(bytes_up.map(|v| v.to_string()).unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(bytes_down.map(|v| v.to_string()).unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(threat.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(message.unwrap_or_default()));
+                line.push(',');
+                line.push_str(&csv_escape(device.unwrap_or_default()));
+                line.push('\n');
+                body.push_str(&line);
+            }
+            (body.into_bytes(), "text/csv", "csv")
+        }
+        "pdf" => {
+            // Simple text-based PDF-like output (HTML content with .pdf extension marker)
+            let mut body = String::from("<html><head><title>Kira Report</title></head><body>");
+            body.push_str(&format!("<h1>Kira Security Report</h1><p>Generated: {}</p>", now.to_rfc3339()));
+            body.push_str(&format!("<p>Tenant: {}</p><p>Events: {}</p>", tenant.name, row_count));
+            body.push_str("<table border='1'><tr><th>Time</th><th>Action</th><th>User</th><th>Destination</th><th>Category</th><th>Threat</th></tr>");
+            for row in &rows {
+                let ts: DateTime<Utc> = row.get("ts");
+                let action: Option<String> = row.get("action");
+                let user: Option<String> = row.get("display_user");
+                let destination: Option<String> = row.get("destination");
+                let category: Option<String> = row.get("category");
+                let threat: Option<String> = row.get("threat_name");
+                body.push_str(&format!(
+                    "<tr><td>{}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td><td>{:?}</td></tr>",
+                    ts.to_rfc3339(), action, user, destination, category, threat
+                ));
+            }
+            body.push_str("</table></body></html>");
+            (body.into_bytes(), "text/html", "pdf")
+        }
+        _ => return Err(ApiError::bad_request("unsupported format")),
+    };
+
+    // Store report result
+    let file_name = format!("kira-report-{}-{}.{}", schedule.name.replace(' ', "_"), now.format("%Y%m%dT%H%M%SZ"), extension);
+    let file_path = format!("/tmp/kira_reports/{}", file_name);
+
+    // Ensure directory exists
+    let _ = std::fs::create_dir_all("/tmp/kira_reports");
+    let _ = std::fs::write(&file_path, &content);
+
+    let result = ReportResult {
+        id: Uuid::new_v4(),
+        schedule_id: schedule.id,
+        status: "generated".to_string(),
+        file_path: Some(file_path.clone()),
+        row_count,
+        error_message: None,
+        generated_at: now,
+        sent_at: None,
+    };
+    state.store.create_report_result(&result).await?;
+
+    // Send email to recipients
+    let recipients: Vec<String> = match &schedule.recipients {
+        serde_json::Value::Array(arr) => arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect(),
+        _ => vec![],
+    };
+
+    if !recipients.is_empty() {
+        let subject = format!("Kira Report: {} ({})", schedule.name, now.format("%Y-%m-%d %H:%M:%S"));
+        let body_text = format!(
+            "Kira Report: {}\nGenerated: {}\nTenant: {}\nFormat: {}\nEvents: {}\n\nSee attached file for details.\n",
+            schedule.name, now.to_rfc3339(), tenant.name, schedule.format, row_count
+        );
+
+        // Send email (best effort - log failure but don't fail the report)
+        if let Err(e) = send_email(state, &recipients, &subject, &body_text) {
+            tracing::warn!(schedule_id = %schedule.id, %e, "failed to send report email");
+        } else {
+            state.store.mark_report_result_sent(result.id).await?;
+        }
+    }
+
+    // Update schedule last_run/next_run
+    let next_run = now + Duration::hours(1);
+    state.store.update_report_schedule_run(schedule.id, now, next_run).await?;
+
+    Ok(())
+}
+
+pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTime<Utc>) -> Result<(), ApiError> {
+    let rules = state.store.get_enabled_alert_rules(tenant_id).await?;
+    if rules.is_empty() {
+        return Ok(());
+    }
+
+    let client = state.store.pool().get().await?;
+
+    for rule in &rules {
+        // Check cooldown
+        if let Some(last_triggered) = rule.last_triggered {
+            let cooldown = Duration::minutes(rule.cooldown_minutes as i64);
+            if now - last_triggered < cooldown {
+                continue;
+            }
+        }
+
+        let (condition_met, message, _event_count) = match rule.condition_type.as_str() {
+            "threat" => {
+                let threshold: i64 = rule.threshold.parse().unwrap_or(1);
+                let row = client.query_one(
+                    "SELECT count(*)::bigint AS cnt FROM events WHERE tenant_id = $1 AND category_group = 'threat' AND ts >= $2 AND ts < $3",
+                    &[&tenant_id, &(now - Duration::hours(1)), &now],
+                ).await?;
+                let cnt: i64 = row.get("cnt");
+                if cnt >= threshold {
+                    (true, format!("{} threat events detected in the last hour (threshold: {})", cnt, threshold), cnt)
+                } else {
+                    (false, String::new(), 0)
+                }
+            }
+            "blocked_category" => {
+                let parts: Vec<&str> = rule.threshold.split(':').collect();
+                let category = parts.first().copied().unwrap_or("");
+                let threshold: i64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+                let row = client.query_one(
+                    "SELECT count(*)::bigint AS cnt FROM events WHERE tenant_id = $1 AND action = 'blocked' AND category = $2 AND ts >= $3 AND ts < $4",
+                    &[&tenant_id, &category, &(now - Duration::hours(1)), &now],
+                ).await?;
+                let cnt: i64 = row.get("cnt");
+                if cnt >= threshold {
+                    (true, format!("{} blocked events for category '{}' in the last hour (threshold: {})", cnt, category, threshold), cnt)
+                } else {
+                    (false, String::new(), 0)
+                }
+            }
+            "large_transfer" => {
+                let threshold: i64 = rule.threshold.parse().unwrap_or(1000000);
+                let row = client.query_one(
+                    "SELECT COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS total FROM events WHERE tenant_id = $1 AND ts >= $2 AND ts < $3",
+                    &[&tenant_id, &(now - Duration::hours(1)), &now],
+                ).await?;
+                let total: i64 = row.get("total");
+                if total >= threshold {
+                    (true, format!("Total transfer {} bytes in the last hour exceeds threshold {}", total, threshold), total)
+                } else {
+                    (false, String::new(), 0)
+                }
+            }
+            _ => continue,
+        };
+
+        if condition_met {
+            let instance = AlertInstance {
+                id: Uuid::new_v4(),
+                rule_id: rule.id,
+                tenant_id,
+                message,
+                severity: rule.severity.clone(),
+                triggered_at: now,
+                acknowledged: false,
+                acknowledged_at: None,
+                acknowledged_by: None,
+            };
+            state.store.create_alert_instance(&instance).await?;
+            state.store.update_alert_rule_last_triggered(rule.id, now).await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn healthz(State(state): State<AppState>) -> Response {
-    let db = state.store.ping().await;
     let db = state.store.ping().await;
     let tenant = match state.default_slug.as_deref() {
         Some(slug) => state.store.tenant_by_slug(slug).await.ok().flatten(),

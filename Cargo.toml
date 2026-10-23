@@ -20,6 +20,9 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_j
 tower-http = { version = "0.6", features = ["fs", "trace", "cors", "compression-gzip"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lettre = { version = "0.11", features = ["smtp-transport", "tokio1", "tokio1-native-tls"] }
+cron = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
 lto = "thin"

@@ -5,15 +5,16 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use axum::routing::get;
+use axum::routing::{get, post, put};
 use axum::Router;
+use chrono::Utc;
 use sfos_store::Store;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
 
-use crate::api::AppState;
+use crate::api::{AppState, evaluate_alert_rules, generate_and_send_report};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -102,12 +103,68 @@ async fn main() -> Result<()> {
         );
     }
 
+    let smtp_host = std::env::var("SMTP_HOST").ok();
+    let smtp_port = std::env::var("SMTP_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let smtp_username = std::env::var("SMTP_USERNAME").ok();
+    let smtp_password = std::env::var("SMTP_PASSWORD").ok();
+    let smtp_from = std::env::var("SMTP_FROM").ok();
+
     let state = AppState {
         store,
         default_slug: Some(tenant_slug),
         retention_admin_token,
         query_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(query_concurrency)),
+        smtp_host,
+        smtp_port,
+        smtp_username,
+        smtp_password,
+        smtp_from,
     };
+
+    // Background scheduler: every minute, check due report schedules and evaluate alert rules.
+    let scheduler_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let now = Utc::now();
+
+            // Check due report schedules
+            match scheduler_state.store.get_due_report_schedules(now).await {
+                Ok(schedules) => {
+                    for schedule in schedules {
+                        let state = scheduler_state.clone();
+                        let schedule_id = schedule.id;
+                        tokio::spawn(async move {
+                            if let Err(e) = generate_and_send_report(&state, &schedule, now).await {
+                                tracing::error!(schedule_id = %schedule_id, %e, "report generation failed");
+                            }
+                        });
+                    }
+                }
+                Err(e) => tracing::error!(%e, "failed to fetch due report schedules"),
+            }
+
+            // Evaluate alert rules
+            match scheduler_state.store.list_tenants().await {
+                Ok(tenants) => {
+                    for tenant in tenants {
+                        let state = scheduler_state.clone();
+                        let tenant_id = tenant.id;
+                        tokio::spawn(async move {
+                            if let Err(e) = evaluate_alert_rules(&state, tenant_id, now).await {
+                                tracing::error!(tenant_id = %tenant_id, %e, "alert evaluation failed");
+                            }
+                        });
+                    }
+                }
+                Err(e) => tracing::error!(%e, "failed to list tenants for alert evaluation"),
+            }
+        }
+    });
 
     let index = web_dir.join("index.html");
     let static_files = ServeDir::new(&web_dir).fallback(ServeFile::new(&index));
@@ -120,6 +177,36 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/events/export",
             get(api::events_export),
+        )
+        .route(
+            "/api/v1/reports/schedules",
+            get(api::list_report_schedules).post(api::create_report_schedule),
+        )
+        .route(
+            "/api/v1/reports/schedules/:id",
+            get(api::list_report_schedules)
+                .put(api::update_report_schedule)
+                .delete(api::delete_report_schedule),
+        )
+        .route(
+            "/api/v1/reports/schedules/:id/results",
+            get(api::list_report_results),
+        )
+        .route(
+            "/api/v1/alerts/rules",
+            get(api::list_alert_rules).post(api::create_alert_rule),
+        )
+        .route(
+            "/api/v1/alerts/rules/:id",
+            put(api::update_alert_rule).delete(api::delete_alert_rule),
+        )
+        .route(
+            "/api/v1/alerts/instances",
+            get(api::list_alert_instances),
+        )
+        .route(
+            "/api/v1/alerts/instances/:id/acknowledge",
+            post(api::acknowledge_alert_instance),
         )
         .route(
             "/api/v1/retention",
