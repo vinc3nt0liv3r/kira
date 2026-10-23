@@ -1,10 +1,20 @@
 import type {
+  AlertInstance,
+  AlertRuleResponse,
+  CreateAlertRule,
+  CreateReportSchedule,
   Dimension,
   EventsResponse,
   Meta,
   Overview,
+  ReportResult,
+  ReportScheduleResponse,
   RetentionPreview,
+  TestWebhookResult,
   TopResponse,
+  UpdateAlertRule,
+  UpdateReportSchedule,
+  WebhookDelivery,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -89,4 +99,179 @@ export const api = {
     }
     return (await res.json()) as { retention_hours: number; message: string };
   },
+
+  // Alert rules
+  listAlertRules: (signal?: AbortSignal) =>
+    get<{ rules: AlertRuleResponse[] }>("/api/v1/alerts/rules", {}, signal),
+  createAlertRule: async (payload: CreateAlertRule): Promise<AlertRuleResponse> => {
+    const res = await fetch(`${BASE}/alerts/rules`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { rule: AlertRuleResponse };
+    return data.rule;
+  },
+  updateAlertRule: async (id: string, payload: UpdateAlertRule): Promise<AlertRuleResponse> => {
+    const res = await fetch(`${BASE}/alerts/rules/${id}`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { rule: AlertRuleResponse };
+    return data.rule;
+  },
+  deleteAlertRule: async (id: string): Promise<void> => {
+    const res = await fetch(`${BASE}/alerts/rules/${id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+  },
+  listAlertInstances: (signal?: AbortSignal) =>
+    get<{ instances: AlertInstance[] }>("/api/v1/alerts/instances", {}, signal),
+  acknowledgeAlertInstance: async (id: string, acknowledged_by: string): Promise<void> => {
+    const res = await fetch(`${BASE}/alerts/instances/${id}/acknowledge`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ acknowledged_by }),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+  },
+  listWebhookDeliveries: (instanceId: string, signal?: AbortSignal) =>
+    get<{ deliveries: WebhookDelivery[] }>(`/api/v1/alerts/instances/${instanceId}/webhook-deliveries`, {}, signal),
+  testWebhook: async (url: string): Promise<TestWebhookResult> => {
+    const res = await fetch(`${BASE}/webhook/test`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as TestWebhookResult;
+  },
+
+  // Report schedules
+  listReportSchedules: (signal?: AbortSignal) =>
+    get<{ schedules: ReportScheduleResponse[] }>("/api/v1/reports/schedules", {}, signal),
+  createReportSchedule: async (payload: CreateReportSchedule): Promise<ReportScheduleResponse> => {
+    const res = await fetch(`${BASE}/reports/schedules`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { schedule: ReportScheduleResponse };
+    return data.schedule;
+  },
+  updateReportSchedule: async (id: string, payload: UpdateReportSchedule): Promise<ReportScheduleResponse> => {
+    const res = await fetch(`${BASE}/reports/schedules/${id}`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { schedule: ReportScheduleResponse };
+    return data.schedule;
+  },
+  deleteReportSchedule: async (id: string): Promise<void> => {
+    const res = await fetch(`${BASE}/reports/schedules/${id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+  },
+  listReportResults: (scheduleId: string, signal?: AbortSignal) =>
+    get<{ results: ReportResult[] }>(`/api/v1/reports/schedules/${scheduleId}/results`, {}, signal),
 };

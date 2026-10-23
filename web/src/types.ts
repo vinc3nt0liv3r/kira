@@ -132,3 +132,150 @@ export interface EventsFilters {
   category?: string;
   device?: string;
 }
+
+export interface AlertRule {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  condition_type: string;
+  threshold: string;
+  severity: string;
+  cooldown_minutes: number;
+  enabled: boolean;
+  webhook_url: string | null;
+  last_triggered: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAlertRule {
+  name: string;
+  description?: string | null;
+  condition_type: string;
+  threshold: string;
+  severity?: string | null;
+  cooldown_minutes?: number;
+  enabled?: boolean;
+  webhook_url?: string | null;
+}
+
+export interface UpdateAlertRule {
+  name?: string;
+  description?: string | null;
+  condition_type?: string;
+  threshold?: string;
+  severity?: string | null;
+  cooldown_minutes?: number;
+  enabled?: boolean;
+  webhook_url?: string | null;
+}
+
+export interface AlertRuleResponse {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  condition_type: string;
+  threshold: string;
+  severity: string;
+  cooldown_minutes: number;
+  enabled: boolean;
+  webhook_url: string | null;
+  last_triggered: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  alert_instance_id: string;
+  webhook_url: string;
+  status: string;
+  response_status_code: number | null;
+  response_body: string | null;
+  error_message: string | null;
+  delivered_at: string;
+}
+
+export interface AlertInstance {
+  id: string;
+  rule_id: string;
+  tenant_id: string;
+  message: string;
+  severity: string;
+  triggered_at: string;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+}
+
+export interface ReportSchedule {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  cron_expression: string;
+  format: string;
+  filters: Record<string, unknown>;
+  recipients: string[];
+  enabled: boolean;
+  last_run: string | null;
+  next_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateReportSchedule {
+  name: string;
+  description?: string | null;
+  cron_expression: string;
+  format: string;
+  filters?: Record<string, unknown>;
+  recipients?: string[];
+  enabled?: boolean;
+}
+
+export interface UpdateReportSchedule {
+  name?: string;
+  description?: string | null;
+  cron_expression?: string;
+  format?: string;
+  filters?: Record<string, unknown>;
+  recipients?: string[];
+  enabled?: boolean;
+}
+
+export interface ReportScheduleResponse {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  cron_expression: string;
+  format: string;
+  filters: Record<string, unknown>;
+  recipients: string[];
+  enabled: boolean;
+  last_run: string | null;
+  next_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportResult {
+  id: string;
+  schedule_id: string;
+  tenant_id: string;
+  status: string;
+  file_path: string | null;
+  row_count: number | null;
+  error_message: string | null;
+  generated_at: string;
+  sent_at: string | null;
+}
+
+export interface TestWebhookResult {
+  status: string;
+  code: number;
+  body: string;
+}

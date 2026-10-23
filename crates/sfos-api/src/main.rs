@@ -209,6 +209,14 @@ async fn main() -> Result<()> {
             post(api::acknowledge_alert_instance),
         )
         .route(
+            "/api/v1/alerts/instances/{id}/webhook-deliveries",
+            get(api::list_webhook_deliveries),
+        )
+        .route(
+            "/api/v1/webhook/test",
+            post(api::test_webhook),
+        )
+        .route(
             "/api/v1/retention",
             get(api::retention_preview).put(api::update_retention),
         )

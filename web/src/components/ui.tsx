@@ -110,3 +110,88 @@ export function Spinner() {
     </svg>
   );
 }
+
+export function Button({
+  children,
+  className = "",
+  onClick,
+  type = "button",
+  variant = "default",
+  size = "md",
+  disabled,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  type?: "button" | "submit" | "reset";
+  variant?: "default" | "secondary" | "danger";
+  size?: "sm" | "md";
+  disabled?: boolean;
+}) {
+  const base = "inline-flex items-center justify-center rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-400/50 disabled:opacity-50 disabled:pointer-events-none";
+  const variants: Record<string, string> = {
+    default: "bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]",
+    secondary: "bg-white/[0.03] text-slate-400 hover:text-slate-200 hover:bg-white/[0.06]",
+    danger: "bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20",
+  };
+  const sizes: Record<string, string> = {
+    sm: "px-2 py-1",
+    md: "px-3 py-1.5",
+  };
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function Input({
+  className = "",
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  className?: string;
+  value?: string;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type={type}
+      value={value ?? ""}
+      onChange={onChange}
+      placeholder={placeholder}
+      className={`rounded-lg border border-white/10 bg-[#070b14] px-2.5 py-1.5 text-xs text-slate-200 focus:border-emerald-400/40 focus:outline-none ${className}`}
+    />
+  );
+}
+
+export function Select({
+  className = "",
+  value,
+  onChange,
+  children,
+}: {
+  className?: string;
+  value: string;
+  onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      className={`rounded-lg border border-white/10 bg-[#070b14] px-2.5 py-1.5 text-xs text-slate-200 focus:border-emerald-400/40 focus:outline-none ${className}`}
+    >
+      {children}
+    </select>
+  );
+}
