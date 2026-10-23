@@ -37,6 +37,11 @@ services:
       API_STATEMENT_TIMEOUT_MS: ${API_STATEMENT_TIMEOUT_MS:-10000}
       RUST_LOG: ${RUST_LOG:-info}
       API_ADDR: 0.0.0.0:8080
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports:
       - "${HOST_BIND_IP:-0.0.0.0}:${API_PORT:-8082}:8080"
     healthcheck:
