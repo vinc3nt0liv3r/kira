@@ -183,13 +183,13 @@ async fn main() -> Result<()> {
             get(api::list_report_schedules).post(api::create_report_schedule),
         )
         .route(
-            "/api/v1/reports/schedules/:id",
+            "/api/v1/reports/schedules/{id}",
             get(api::list_report_schedules)
                 .put(api::update_report_schedule)
                 .delete(api::delete_report_schedule),
         )
         .route(
-            "/api/v1/reports/schedules/:id/results",
+            "/api/v1/reports/schedules/{id}/results",
             get(api::list_report_results),
         )
         .route(
@@ -197,7 +197,7 @@ async fn main() -> Result<()> {
             get(api::list_alert_rules).post(api::create_alert_rule),
         )
         .route(
-            "/api/v1/alerts/rules/:id",
+            "/api/v1/alerts/rules/{id}",
             put(api::update_alert_rule).delete(api::delete_alert_rule),
         )
         .route(
@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
             get(api::list_alert_instances),
         )
         .route(
-            "/api/v1/alerts/instances/:id/acknowledge",
+            "/api/v1/alerts/instances/{id}/acknowledge",
             post(api::acknowledge_alert_instance),
         )
         .route(
