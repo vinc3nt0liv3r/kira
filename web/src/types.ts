@@ -215,7 +215,7 @@ export interface ReportSchedule {
   tenant_id: string;
   name: string;
   description: string | null;
-  cron_expression: string;
+  cron_schedule: string;
   format: string;
   filters: Record<string, unknown>;
   recipients: string[];
@@ -229,7 +229,7 @@ export interface ReportSchedule {
 export interface CreateReportSchedule {
   name: string;
   description?: string | null;
-  cron_expression: string;
+  cron_schedule: string;
   format: string;
   filters?: Record<string, unknown>;
   recipients?: string[];
@@ -239,7 +239,7 @@ export interface CreateReportSchedule {
 export interface UpdateReportSchedule {
   name?: string;
   description?: string | null;
-  cron_expression?: string;
+  cron_schedule?: string;
   format?: string;
   filters?: Record<string, unknown>;
   recipients?: string[];
@@ -251,7 +251,7 @@ export interface ReportScheduleResponse {
   tenant_id: string;
   name: string;
   description: string | null;
-  cron_expression: string;
+  cron_schedule: string;
   format: string;
   filters: Record<string, unknown>;
   recipients: string[];

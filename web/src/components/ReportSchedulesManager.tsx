@@ -13,7 +13,7 @@ export default function ReportSchedulesManager() {
   const [form, setForm] = useState<CreateReportSchedule & { id?: string }>({
     name: "",
     description: "",
-    cron_expression: "0 * * * *",
+    cron_schedule: "0 * * * *",
     format: "pdf",
     filters: {},
     recipients: [],
@@ -50,7 +50,7 @@ export default function ReportSchedulesManager() {
     const payload: CreateReportSchedule = {
       name: form.name,
       description: form.description || null,
-      cron_expression: form.cron_expression,
+      cron_schedule: form.cron_schedule,
       format: form.format,
       filters: form.filters,
       recipients: form.recipients,
@@ -61,7 +61,7 @@ export default function ReportSchedulesManager() {
         await api.updateReportSchedule(form.id, {
           name: form.name,
           description: form.description || null,
-          cron_expression: form.cron_expression,
+          cron_schedule: form.cron_schedule,
           format: form.format,
           filters: form.filters,
           recipients: form.recipients,
@@ -72,7 +72,7 @@ export default function ReportSchedulesManager() {
       }
       setOpen(false);
       setEditing(null);
-      setForm({ name: "", description: "", cron_expression: "0 * * * *", format: "pdf", filters: {}, recipients: [], enabled: true });
+      setForm({ name: "", description: "", cron_schedule: "0 * * * *", format: "pdf", filters: {}, recipients: [], enabled: true });
       await load();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to save schedule");
@@ -116,7 +116,7 @@ export default function ReportSchedulesManager() {
     <Card className="p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-100">Report Schedules</h2>
-        <Button onClick={() => { setEditing(null); setForm({ name: "", description: "", cron_expression: "0 * * * *", format: "pdf", filters: {}, recipients: [], enabled: true }); setOpen(true); }}>
+        <Button onClick={() => { setEditing(null); setForm({ name: "", description: "", cron_schedule: "0 * * * *", format: "pdf", filters: {}, recipients: [], enabled: true }); setOpen(true); }}>
           + Add Schedule
         </Button>
       </div>
@@ -137,14 +137,14 @@ export default function ReportSchedulesManager() {
             {schedules.map((s) => (
               <tr key={s.id} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer" onClick={() => loadResults(s.id)}>
                 <td className="py-2 text-slate-200">{s.name}</td>
-                <td className="py-2 text-slate-300">{s.cron_expression}</td>
+                <td className="py-2 text-slate-300">{s.cron_schedule}</td>
                 <td className="py-2 text-slate-300">{s.format}</td>
                 <td className="py-2 text-slate-300">{s.enabled ? "Yes" : "No"}</td>
                 <td className="py-2 text-slate-500 text-[11px]">{s.last_run ? new Date(s.last_run).toLocaleString() : "—"}</td>
                 <td className="py-2 text-right">
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); handleGenerateNow(s.id); }}>Generate Now</Button>
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); handleDelete(s.id); }} variant="danger">Delete</Button>
-                  <Button size="sm" onClick={(e) => { e.stopPropagation(); setEditing(s); setForm({ id: s.id, name: s.name, description: s.description || "", cron_expression: s.cron_expression, format: s.format, filters: s.filters, recipients: s.recipients, enabled: s.enabled }); setOpen(true); }} variant="secondary">Edit</Button>
+                  <Button size="sm" onClick={(e) => { e.stopPropagation(); setEditing(s); setForm({ id: s.id, name: s.name, description: s.description || "", cron_schedule: s.cron_schedule, format: s.format, filters: s.filters, recipients: s.recipients, enabled: s.enabled }); setOpen(true); }} variant="secondary">Edit</Button>
                 </td>
               </tr>
             ))}
@@ -220,7 +220,7 @@ export default function ReportSchedulesManager() {
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Cron Expression</label>
-                <Input placeholder="0 * * * *" value={form.cron_expression} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, cron_expression: e.target.value })} />
+                <Input placeholder="0 * * * *" value={form.cron_schedule} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, cron_schedule: e.target.value })} />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Format</label>
