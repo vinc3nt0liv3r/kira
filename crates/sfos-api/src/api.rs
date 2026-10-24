@@ -2225,12 +2225,21 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
     let client = state.store.pool().get().await?;
     let rows = client
         .query(
-            "SELECT ts, log_type, log_component, category_group, action, COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
-                    COALESCE(domain, host(dst_ip)::text) AS destination, application, category,
-                    COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type,
-                    url, host(src_ip)::text AS src_ip, host(dst_ip)::text AS dst_ip, fw_rule_name,
+            "SELECT ts, log_type, log_component, category_group, action, display_user,
+                    destination, application, category, category_type,
+                    url, src_ip, dst_ip, fw_rule_name,
                     sent_bytes, recv_bytes, threat_name, message, device_name
-             FROM events
+             FROM (
+                 SELECT tenant_id, id, ts, category_group, action, log_type, log_component, device_name,
+                        host(src_ip) AS src_ip, host(dst_ip) AS dst_ip,
+                        domain,
+                        COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
+                        url, application, category,
+                        COALESCE(category_type, attrs->>'http_category_type',
+                                 attrs->>'category_type') AS category_type,
+                        fw_rule_name, sent_bytes, recv_bytes, threat_name, message
+                 FROM events
+             ) e
              WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
                AND ($4::text IS NULL OR display_user ILIKE '%' || $4 || '%'
                     OR domain ILIKE '%' || $4 || '%'
@@ -2238,14 +2247,14 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
                     OR message ILIKE '%' || $4 || '%'
                     OR threat_name ILIKE '%' || $4 || '%'
                     OR category ILIKE '%' || $4 || '%'
-                    OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $4 || '%'
+                    OR category_type ILIKE '%' || $4 || '%'
                     OR fw_rule_name ILIKE '%' || $4 || '%'
                     OR host(src_ip) = $4)
                AND ($5::text IS NULL OR action = $5)
                AND ($6::text IS NULL OR category_group = $6)
                AND ($9::text IS NULL OR display_user ILIKE '%' || $9 || '%')
                AND ($10::text IS NULL OR category ILIKE '%' || $10 || '%'
-                    OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $10 || '%')
+                    OR category_type ILIKE '%' || $10 || '%')
                AND ($11::text IS NULL OR device_name ILIKE '%' || $11 || '%')
              ORDER BY ts ASC
              LIMIT 100000",
