@@ -219,6 +219,7 @@ export interface ReportSchedule {
   format: string;
   filters: Record<string, unknown>;
   recipients: string[];
+  report_type: string;
   enabled: boolean;
   last_run: string | null;
   next_run: string | null;
@@ -255,9 +256,74 @@ export interface ReportScheduleResponse {
   format: string;
   filters: Record<string, unknown>;
   recipients: string[];
+  report_type: string;
   enabled: boolean;
   last_run: string | null;
   next_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportTemplate {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  default_filters: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CreateReportTemplate {
+  name: string;
+  description?: string | null;
+  category?: string;
+  default_filters?: Record<string, unknown>;
+}
+
+export interface ReportTemplateResponse {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  default_filters: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CustomReport {
+  id: string;
+  tenant_id: string;
+  template_id: string | null;
+  name: string;
+  description: string | null;
+  filters: Record<string, unknown>;
+  format: string;
+  recipients: string[];
+  last_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCustomReport {
+  name: string;
+  template_id?: string;
+  description?: string | null;
+  filters?: Record<string, unknown>;
+  format?: string;
+  recipients?: string[];
+}
+
+export interface CustomReportResponse {
+  id: string;
+  tenant_id: string;
+  template_id: string | null;
+  name: string;
+  description: string | null;
+  filters: Record<string, unknown>;
+  format: string;
+  recipients: string[];
+  last_run: string | null;
   created_at: string;
   updated_at: string;
 }

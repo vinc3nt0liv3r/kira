@@ -44,6 +44,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0010_alert_webhooks",
         include_str!("../migrations/0010_alert_webhooks.sql"),
     ),
+    (
+        "0011_custom_reports",
+        include_str!("../migrations/0011_custom_reports.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -66,6 +70,7 @@ pub struct ReportSchedule {
     pub format: String,
     pub recipients: serde_json::Value,
     pub filters: serde_json::Value,
+    pub report_type: String,
     pub enabled: bool,
     pub last_run: Option<chrono::DateTime<Utc>>,
     pub next_run: Option<chrono::DateTime<Utc>>,
@@ -83,6 +88,17 @@ pub struct ReportResult {
     pub error_message: Option<String>,
     pub generated_at: chrono::DateTime<Utc>,
     pub sent_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReportTemplate {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub category: String,
+    pub default_filters: serde_json::Value,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -636,9 +652,9 @@ impl Store {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "INSERT INTO report_schedules (tenant_id, name, description, cron_schedule, format, recipients, filters, enabled)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at",
+                "INSERT INTO report_schedules (tenant_id, name, description, cron_schedule, format, recipients, filters, report_type, enabled)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, report_type, enabled, last_run, next_run, created_at, updated_at",
                 &[
                     &schedule.tenant_id,
                     &schedule.name,
@@ -647,6 +663,7 @@ impl Store {
                     &schedule.format,
                     &schedule.recipients,
                     &schedule.filters,
+                    &schedule.report_type,
                     &schedule.enabled,
                 ],
             )
@@ -658,7 +675,7 @@ impl Store {
         let client = self.pool.get().await?;
         let rows = client
             .query(
-                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at
+                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, report_type, enabled, last_run, next_run, created_at, updated_at
                  FROM report_schedules WHERE tenant_id = $1 ORDER BY created_at DESC",
                 &[&tenant_id],
             )
@@ -671,9 +688,9 @@ impl Store {
         let row = client
             .query_opt(
                 "UPDATE report_schedules
-                 SET name = $2, description = $3, cron_schedule = $4, format = $5, recipients = $6, filters = $7, enabled = $8, updated_at = now()
+                 SET name = $2, description = $3, cron_schedule = $4, format = $5, recipients = $6, filters = $7, report_type = $8, enabled = $9, updated_at = now()
                  WHERE id = $1
-                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at",
+                 RETURNING id, tenant_id, name, description, cron_schedule, format, recipients, filters, report_type, enabled, last_run, next_run, created_at, updated_at",
                 &[
                     &id,
                     &schedule.name,
@@ -682,6 +699,7 @@ impl Store {
                     &schedule.format,
                     &schedule.recipients,
                     &schedule.filters,
+                    &schedule.report_type,
                     &schedule.enabled,
                 ],
             )
@@ -701,9 +719,9 @@ impl Store {
         let client = self.pool.get().await?;
         let rows = client
             .query(
-                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, enabled, last_run, next_run, created_at, updated_at
+                "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters, report_type, enabled, last_run, next_run, created_at, updated_at
                  FROM report_schedules
-                 WHERE enabled AND (next_run IS NULL OR next_run <= $1)",
+                 WHERE report_type = 'scheduled' AND enabled AND (next_run IS NULL OR next_run <= $1)",
                 &[&now],
             )
             .await?;
@@ -758,7 +776,7 @@ impl Store {
         let row = client
             .query_opt(
                 "SELECT id, tenant_id, name, description, cron_schedule, format, recipients, filters,
-                        enabled, last_run, next_run, created_at, updated_at
+                        report_type, enabled, last_run, next_run, created_at, updated_at
                  FROM report_schedules WHERE id = $1",
                 &[&id],
             )
@@ -787,6 +805,44 @@ impl Store {
             )
             .await?;
         Ok(())
+    }
+
+    // Report template CRUD
+    pub async fn list_report_templates(&self, tenant_id: Uuid) -> Result<Vec<ReportTemplate>> {
+        let client = self.pool.get().await?;
+        let rows = client
+            .query(
+                "SELECT id, tenant_id, name, description, category, default_filters, created_at
+                 FROM report_templates WHERE tenant_id = $1 ORDER BY category, name",
+                &[&tenant_id],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| ReportTemplate::from(row)).collect())
+    }
+
+    pub async fn create_report_template(&self, template: &ReportTemplate) -> Result<ReportTemplate> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "INSERT INTO report_templates (tenant_id, name, description, category, default_filters)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, tenant_id, name, description, category, default_filters, created_at",
+                &[
+                    &template.tenant_id,
+                    &template.name,
+                    &template.description,
+                    &template.category,
+                    &template.default_filters,
+                ],
+            )
+            .await?;
+        Ok(ReportTemplate::from(&row))
+    }
+
+    pub async fn delete_report_template(&self, id: Uuid) -> Result<bool> {
+        let client = self.pool.get().await?;
+        let deleted = client.execute("DELETE FROM report_templates WHERE id = $1", &[&id]).await?;
+        Ok(deleted > 0)
     }
 
     // Alert rule CRUD
@@ -1014,6 +1070,7 @@ impl From<&tokio_postgres::Row> for ReportSchedule {
             format: row.get("format"),
             recipients: row.get("recipients"),
             filters: row.get("filters"),
+            report_type: row.get("report_type"),
             enabled: row.get("enabled"),
             last_run: row.get("last_run"),
             next_run: row.get("next_run"),
@@ -1034,6 +1091,20 @@ impl From<&tokio_postgres::Row> for ReportResult {
             error_message: row.get("error_message"),
             generated_at: row.get("generated_at"),
             sent_at: row.get("sent_at"),
+        }
+    }
+}
+
+impl From<&tokio_postgres::Row> for ReportTemplate {
+    fn from(row: &tokio_postgres::Row) -> ReportTemplate {
+        ReportTemplate {
+            id: row.get("id"),
+            tenant_id: row.get("tenant_id"),
+            name: row.get("name"),
+            description: row.get("description"),
+            category: row.get("category"),
+            default_filters: row.get("default_filters"),
+            created_at: row.get("created_at"),
         }
     }
 }

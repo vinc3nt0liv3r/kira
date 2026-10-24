@@ -10,6 +10,7 @@ import { TopPanel } from "./components/TopPanel";
 import { TrafficChart, type TrafficMode } from "./components/TrafficChart";
 import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
+import CustomReportsManager from "./components/CustomReportsManager";
 import { Card, Skeleton, Spinner } from "./components/ui";
 
 const RANGES = [
@@ -359,6 +360,7 @@ export default function App() {
 
         <AlertRulesManager />
         <ReportSchedulesManager />
+        <CustomReportsManager />
 
         <footer className="flex flex-wrap items-center justify-between gap-2 pb-4 pt-1 text-[10px] text-slate-600">
           <span>

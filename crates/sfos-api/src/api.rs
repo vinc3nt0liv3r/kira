@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use lettre::Transport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, Store, Tenant, WebhookDelivery};
+use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, ReportTemplate, Store, Tenant, WebhookDelivery};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
@@ -597,6 +597,51 @@ pub struct ReportResultResponse {
     pub error_message: Option<String>,
     pub generated_at: DateTime<Utc>,
     pub sent_at: Option<DateTime<Utc>>,
+}
+
+// Custom report request/response types
+#[derive(Debug, Deserialize)]
+pub struct CreateReportTemplate {
+    pub name: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub default_filters: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReportTemplateResponse {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub category: String,
+    pub default_filters: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCustomReport {
+    pub name: String,
+    pub template_id: Option<Uuid>,
+    pub description: Option<String>,
+    pub filters: Option<serde_json::Value>,
+    pub format: Option<String>,
+    pub recipients: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CustomReportResponse {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub template_id: Option<Uuid>,
+    pub name: String,
+    pub description: Option<String>,
+    pub filters: serde_json::Value,
+    pub format: String,
+    pub recipients: serde_json::Value,
+    pub last_run: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 // Alert request/response types
@@ -1243,6 +1288,7 @@ pub async fn create_report_schedule(
         format: payload.format,
         recipients: payload.recipients.unwrap_or(serde_json::json!([])),
         filters: payload.filters.unwrap_or(serde_json::json!({})),
+        report_type: "scheduled".to_string(),
         enabled: payload.enabled.unwrap_or(true),
         last_run: None,
         next_run: None,
@@ -1286,6 +1332,7 @@ pub async fn update_report_schedule(
         format: payload.format.unwrap_or_default(),
         recipients: payload.recipients.unwrap_or(serde_json::json!([])),
         filters: payload.filters.unwrap_or(serde_json::json!({})),
+        report_type: "scheduled".to_string(),
         enabled: payload.enabled.unwrap_or(true),
         last_run: None,
         next_run: None,
@@ -1414,6 +1461,281 @@ pub async fn download_report_result(
         .header("Content-Length", content.len())
         .body(axum::body::Body::from(content))
         .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
+}
+
+// Custom report handlers
+
+pub async fn list_report_templates(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let templates = state.store.list_report_templates(tenant.id).await?;
+    Ok(Json(json!({
+        "templates": templates.iter().map(|t| ReportTemplateResponse {
+            id: t.id,
+            tenant_id: t.tenant_id,
+            name: t.name.clone(),
+            description: t.description.clone(),
+            category: t.category.clone(),
+            default_filters: t.default_filters.clone(),
+            created_at: t.created_at,
+        }).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn create_report_template(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+    Json(payload): Json<CreateReportTemplate>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let template = ReportTemplate {
+        id: Uuid::new_v4(),
+        tenant_id: tenant.id,
+        name: payload.name,
+        description: payload.description,
+        category: payload.category.unwrap_or("custom".to_string()),
+        default_filters: payload.default_filters.unwrap_or(serde_json::json!({})),
+        created_at: Utc::now(),
+    };
+    let created = state.store.create_report_template(&template).await?;
+    Ok(Json(json!({
+        "template": ReportTemplateResponse {
+            id: created.id,
+            tenant_id: created.tenant_id,
+            name: created.name,
+            description: created.description,
+            category: created.category,
+            default_filters: created.default_filters,
+            created_at: created.created_at,
+        }
+    })))
+}
+
+pub async fn delete_report_template(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let template = state.store.list_report_templates(tenant.id).await?;
+    if !template.iter().any(|t| t.id == id) {
+        return Err(ApiError::not_found("report template not found"));
+    }
+    let deleted = state.store.delete_report_template(id).await?;
+    if deleted {
+        Ok(Json(json!({"message": "template deleted"})))
+    } else {
+        Err(ApiError::not_found("report template not found"))
+    }
+}
+
+pub async fn list_custom_reports(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let schedules = state.store.list_report_schedules(tenant.id).await?;
+    let custom: Vec<&ReportSchedule> = schedules.iter().filter(|s| s.report_type == "custom").collect();
+    Ok(Json(json!({
+        "reports": custom.iter().map(|r| CustomReportResponse {
+            id: r.id,
+            tenant_id: r.tenant_id,
+            template_id: None,
+            name: r.name.clone(),
+            description: r.description.clone(),
+            filters: r.filters.clone(),
+            format: r.format.clone(),
+            recipients: r.recipients.clone(),
+            last_run: r.last_run,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }).collect::<Vec<_>>()
+    })))
+}
+
+pub async fn create_custom_report(
+    State(state): State<AppState>,
+    Query(query): Query<serde_json::Value>,
+    Json(payload): Json<CreateCustomReport>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let format = payload.format.unwrap_or_else(|| "pdf".to_string());
+    if !["csv", "pdf"].contains(&format.as_str()) {
+        return Err(ApiError::bad_request("format must be csv or pdf"));
+    }
+    // If template_id is provided, merge template default_filters with payload filters
+    let mut filters = payload.filters.unwrap_or(serde_json::json!({}));
+    if let Some(template_id) = payload.template_id {
+        let templates = state.store.list_report_templates(tenant.id).await?;
+        if let Some(tmpl) = templates.iter().find(|t| t.id == template_id) {
+            let mut merged = tmpl.default_filters.clone();
+            if let serde_json::Value::Object(map) = &mut merged {
+                if let serde_json::Value::Object(payload_map) = &filters {
+                    for (k, v) in payload_map {
+                        map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            filters = merged;
+        }
+    }
+    let report = ReportSchedule {
+        id: Uuid::new_v4(),
+        tenant_id: tenant.id,
+        name: payload.name,
+        description: payload.description,
+        cron_schedule: "".to_string(),
+        format,
+        recipients: payload.recipients.unwrap_or(serde_json::json!([])),
+        filters,
+        report_type: "custom".to_string(),
+        enabled: false,
+        last_run: None,
+        next_run: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let created = state.store.create_report_schedule(&report).await?;
+    Ok(Json(json!({
+        "report": CustomReportResponse {
+            id: created.id,
+            tenant_id: created.tenant_id,
+            template_id: None,
+            name: created.name,
+            description: created.description,
+            filters: created.filters,
+            format: created.format,
+            recipients: created.recipients,
+            last_run: created.last_run,
+            created_at: created.created_at,
+            updated_at: created.updated_at,
+        }
+    })))
+}
+
+pub async fn get_custom_report(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let report = state.store.get_report_schedule(id).await?
+        .ok_or_else(|| ApiError::not_found("custom report not found"))?;
+    if report.tenant_id != tenant.id || report.report_type != "custom" {
+        return Err(ApiError::not_found("custom report not found"));
+    }
+    Ok(Json(json!({
+        "report": CustomReportResponse {
+            id: report.id,
+            tenant_id: report.tenant_id,
+            template_id: None,
+            name: report.name,
+            description: report.description,
+            filters: report.filters,
+            format: report.format,
+            recipients: report.recipients,
+            last_run: report.last_run,
+            created_at: report.created_at,
+            updated_at: report.updated_at,
+        }
+    })))
+}
+
+pub async fn update_custom_report(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+    Json(payload): Json<CreateCustomReport>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let report = state.store.get_report_schedule(id).await?
+        .ok_or_else(|| ApiError::not_found("custom report not found"))?;
+    if report.tenant_id != tenant.id || report.report_type != "custom" {
+        return Err(ApiError::not_found("custom report not found"));
+    }
+    let format = payload.format.unwrap_or(report.format);
+    if !["csv", "pdf"].contains(&format.as_str()) {
+        return Err(ApiError::bad_request("format must be csv or pdf"));
+    }
+    let updated = ReportSchedule {
+        id,
+        tenant_id: tenant.id,
+        name: payload.name,
+        description: payload.description.or(report.description),
+        cron_schedule: report.cron_schedule,
+        format,
+        recipients: payload.recipients.unwrap_or(report.recipients),
+        filters: payload.filters.unwrap_or(report.filters),
+        report_type: "custom".to_string(),
+        enabled: false,
+        last_run: report.last_run,
+        next_run: None,
+        created_at: report.created_at,
+        updated_at: Utc::now(),
+    };
+    let result = state.store.update_report_schedule(id, &updated).await?
+        .ok_or_else(|| ApiError::not_found("custom report not found"))?;
+    Ok(Json(json!({
+        "report": CustomReportResponse {
+            id: result.id,
+            tenant_id: result.tenant_id,
+            template_id: None,
+            name: result.name,
+            description: result.description,
+            filters: result.filters,
+            format: result.format,
+            recipients: result.recipients,
+            last_run: result.last_run,
+            created_at: result.created_at,
+            updated_at: result.updated_at,
+        }
+    })))
+}
+
+pub async fn delete_custom_report(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let report = state.store.get_report_schedule(id).await?
+        .ok_or_else(|| ApiError::not_found("custom report not found"))?;
+    if report.tenant_id != tenant.id || report.report_type != "custom" {
+        return Err(ApiError::not_found("custom report not found"));
+    }
+    let deleted = state.store.delete_report_schedule(id).await?;
+    if deleted {
+        Ok(Json(json!({"message": "custom report deleted"})))
+    } else {
+        Err(ApiError::not_found("custom report not found"))
+    }
+}
+
+pub async fn run_custom_report(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
+    Query(query): Query<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
+    let report = state.store.get_report_schedule(id).await?
+        .ok_or_else(|| ApiError::not_found("custom report not found"))?;
+    if report.tenant_id != tenant.id || report.report_type != "custom" {
+        return Err(ApiError::not_found("custom report not found"));
+    }
+    let now = Utc::now();
+    generate_and_send_report(&state, &report, now).await?;
+    // Fetch the just-created result to return its download info
+    let results = state.store.list_report_results(id).await?;
+    let latest = results.into_iter().next()
+        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("no report result generated")))?;
+    Ok(Json(json!({
+        "result_id": latest.id,
+        "status": latest.status,
+        "file_path": latest.file_path,
+        "generated_at": latest.generated_at,
+    })))
 }
 
 // Alert rule handlers

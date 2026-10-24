@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use chrono::Utc;
 use sfos_store::Store;
@@ -203,6 +203,28 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/reports/generate",
             post(api::generate_report_on_demand),
+        )
+        .route(
+            "/api/v1/reports/templates",
+            get(api::list_report_templates).post(api::create_report_template),
+        )
+        .route(
+            "/api/v1/reports/templates/{id}",
+            delete(api::delete_report_template),
+        )
+        .route(
+            "/api/v1/reports/custom",
+            get(api::list_custom_reports).post(api::create_custom_report),
+        )
+        .route(
+            "/api/v1/reports/custom/{id}",
+            get(api::get_custom_report)
+                .put(api::update_custom_report)
+                .delete(api::delete_custom_report),
+        )
+        .route(
+            "/api/v1/reports/custom/{id}/run",
+            post(api::run_custom_report),
         )
         .route(
             "/api/v1/alerts/rules",

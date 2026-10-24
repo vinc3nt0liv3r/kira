@@ -2,13 +2,17 @@ import type {
   AlertInstance,
   AlertRuleResponse,
   CreateAlertRule,
+  CreateCustomReport,
   CreateReportSchedule,
+  CreateReportTemplate,
+  CustomReportResponse,
   Dimension,
   EventsResponse,
   Meta,
   Overview,
   ReportResult,
   ReportScheduleResponse,
+  ReportTemplateResponse,
   RetentionPreview,
   TestWebhookResult,
   TopResponse,
@@ -363,5 +367,144 @@ export const api = {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  },
+
+  // Custom Reports
+  listReportTemplates: (signal?: AbortSignal) =>
+    get<{ templates: ReportTemplateResponse[] }>("/api/v1/reports/templates", {}, signal),
+  createReportTemplate: async (payload: CreateReportTemplate): Promise<ReportTemplateResponse> => {
+    const res = await fetch(`${BASE}/reports/templates`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { template: ReportTemplateResponse };
+    return data.template;
+  },
+  deleteReportTemplate: async (id: string): Promise<void> => {
+    const res = await fetch(`${BASE}/reports/templates/${id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+  },
+  listCustomReports: (signal?: AbortSignal) =>
+    get<{ reports: CustomReportResponse[] }>("/api/v1/reports/custom", {}, signal),
+  createCustomReport: async (payload: CreateCustomReport): Promise<CustomReportResponse> => {
+    const res = await fetch(`${BASE}/reports/custom`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { report: CustomReportResponse };
+    return data.report;
+  },
+  getCustomReport: async (id: string): Promise<CustomReportResponse> => {
+    const res = await fetch(`${BASE}/reports/custom/${id}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { report: CustomReportResponse };
+    return data.report;
+  },
+  updateCustomReport: async (id: string, payload: CreateCustomReport): Promise<CustomReportResponse> => {
+    const res = await fetch(`${BASE}/reports/custom/${id}`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const data = await res.json() as { report: CustomReportResponse };
+    return data.report;
+  },
+  deleteCustomReport: async (id: string): Promise<void> => {
+    const res = await fetch(`${BASE}/reports/custom/${id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+  },
+  runCustomReport: async (id: string): Promise<{ result_id: string; status: string; file_path: string | null; generated_at: string }> => {
+    const res = await fetch(`${BASE}/reports/custom/${id}/run`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    return (await res.json()) as { result_id: string; status: string; file_path: string | null; generated_at: string };
   },
 };
