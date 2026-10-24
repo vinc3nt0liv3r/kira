@@ -62,7 +62,7 @@ export const api = {
     opts: { q?: string; action?: string; group?: string; user?: string; category?: string; device?: string; limit?: number },
     signal?: AbortSignal,
   ) => get<EventsResponse>("/events", { tenant, from, ...opts }, signal),
-  exportEvents: (filters: {
+  exportEvents: async (filters: {
     tenant: string;
     from: string;
     q?: string;
@@ -71,13 +71,39 @@ export const api = {
     user?: string;
     category?: string;
     device?: string;
-  }) => {
+  }): Promise<void> => {
     const qs = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
       if (value === undefined || value === null || value === "") continue;
       qs.set(key, String(value));
     }
-    window.open(`${BASE}/events/export?${qs.toString()}`, "_blank");
+    const res = await fetch(`${BASE}/events/export?${qs.toString()}`, {
+      method: "GET",
+      headers: { Accept: "text/csv" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const disposition = res.headers.get("Content-Disposition");
+    const filename = disposition
+      ?.match(/filename[^;=\n]*=((['"])(.*?)\2|[^\n;]*)/)
+      ?.pop()?.replace(/['"]/g, "") || "report";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
   retention: (signal?: AbortSignal) =>
     get<RetentionPreview>("/retention", {}, signal),
