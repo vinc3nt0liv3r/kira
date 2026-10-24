@@ -201,6 +201,10 @@ async fn main() -> Result<()> {
             get(api::download_report_result),
         )
         .route(
+            "/api/v1/reports/generate",
+            post(api::generate_report_on_demand),
+        )
+        .route(
             "/api/v1/alerts/rules",
             get(api::list_alert_rules).post(api::create_alert_rule),
         )

@@ -102,9 +102,9 @@ export default function ReportSchedulesManager() {
     }
   };
 
-  const handleDownloadResult = async (resultId: string) => {
+  const handleDownloadResult = async (scheduleId: string, resultId: string) => {
     try {
-      await api.downloadReportResult(resultId);
+      await api.downloadReportResult(scheduleId, resultId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to download report");
     }
@@ -188,7 +188,7 @@ export default function ReportSchedulesManager() {
                     </td>
                     <td className="py-2 text-right">
                       {r.file_path ? (
-                        <Button size="sm" onClick={() => handleDownloadResult(r.id)}>Download</Button>
+                        <Button size="sm" onClick={() => handleDownloadResult(r.schedule_id, r.id)}>Download</Button>
                       ) : (
                         <span className="text-slate-500 text-[10px]">—</span>
                       )}

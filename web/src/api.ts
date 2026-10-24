@@ -293,10 +293,52 @@ export const api = {
     }
     return (await res.json()) as { message: string };
   },
-  downloadReportResult: async (resultId: string): Promise<void> => {
-    const res = await fetch(`${BASE}/reports/schedules/0/results/${resultId}/download`, {
+  downloadReportResult: async (scheduleId: string, resultId: string): Promise<void> => {
+    const res = await fetch(`${BASE}/reports/schedules/${scheduleId}/results/${resultId}/download`, {
       method: "GET",
       headers: { Accept: "application/octet-stream" },
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the body is not JSON.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const disposition = res.headers.get("Content-Disposition");
+    const filename = disposition
+      ?.match(/filename[^;=\n]*=((['"])(.*?)\2|[^\n;]*)/)
+      ?.pop()?.replace(/['"]/g, "") || "report";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+  downloadReportOnDemand: async (payload: {
+    format?: string;
+    filters?: Record<string, unknown>;
+    tenant?: string;
+  }): Promise<void> => {
+    const qs = new URLSearchParams();
+    if (payload.tenant) qs.set("tenant", payload.tenant);
+    const res = await fetch(`${BASE}/reports/generate?${qs.toString()}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/octet-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        format: payload.format ?? "pdf",
+        filters: payload.filters ?? {},
+      }),
     });
     if (!res.ok) {
       let message = `Request failed (${res.status})`;

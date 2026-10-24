@@ -138,6 +138,27 @@ export function EventsTable({
             >
               Export CSV
             </button>
+            <button
+              type="button"
+              onClick={() =>
+                api.downloadReportOnDemand({
+                  format: "pdf",
+                  tenant,
+                  filters: {
+                    from,
+                    q: query || undefined,
+                    action: action || undefined,
+                    group: group || undefined,
+                    user: user || undefined,
+                    category: category || undefined,
+                    device: device || undefined,
+                  },
+                })
+              }
+              className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs text-slate-300 hover:text-slate-100"
+            >
+              Download PDF
+            </button>
             {loading ? <Spinner /> : null}
           </div>
         </div>
