@@ -6,6 +6,7 @@ import type {
   CustomReportResponse,
   ReportTemplateResponse,
 } from "../types";
+import { ReportFilterBuilder } from "./ReportFilterBuilder";
 import { Card, Button, Input, Select, Skeleton } from "./ui";
 
 const CATEGORIES = [
@@ -281,8 +282,13 @@ export default function CustomReportsManager() {
                 </Select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Default Filters (JSON)</label>
-                <Input placeholder='{"from": "24h", "to": "now"}' value={JSON.stringify(templateForm.default_filters)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { try { setTemplateForm({ ...templateForm, default_filters: JSON.parse(e.target.value || "{}" ) }); } catch {} }} />
+                <label className="block text-[11px] text-slate-500 mb-1">Default Filters</label>
+                <ReportFilterBuilder
+                  filters={templateForm.default_filters as Record<string, unknown>}
+                  onChange={(filters) =>
+                    setTemplateForm({ ...templateForm, default_filters: filters })
+                  }
+                />
               </div>
               <div className="flex items-center justify-end gap-2">
                 <Button type="button" onClick={() => { setOpenTemplate(false); setEditingTemplate(null); }} variant="secondary">Cancel</Button>
@@ -318,8 +324,11 @@ export default function CustomReportsManager() {
                 <Input value={reportForm.description || ""} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportForm({ ...reportForm, description: e.target.value })} />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Filters (JSON)</label>
-                <Input placeholder='{"from": "24h", "to": "now"}' value={JSON.stringify(reportForm.filters)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { try { setReportForm({ ...reportForm, filters: JSON.parse(e.target.value || "{}" ) }); } catch {} }} />
+                <label className="block text-[11px] text-slate-500 mb-1">Filters</label>
+                <ReportFilterBuilder
+                  filters={reportForm.filters as Record<string, unknown>}
+                  onChange={(filters) => setReportForm({ ...reportForm, filters })}
+                />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Format</label>

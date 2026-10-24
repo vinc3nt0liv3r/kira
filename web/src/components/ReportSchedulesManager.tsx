@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ReportResult, ReportScheduleResponse, CreateReportSchedule } from "../types";
+import { ReportFilterBuilder } from "./ReportFilterBuilder";
 import { Card, Button, Input, Select, Skeleton } from "./ui";
 
 export default function ReportSchedulesManager() {
@@ -234,8 +235,13 @@ export default function ReportSchedulesManager() {
                 <Input placeholder="admin@example.com" value={(form.recipients ?? []).join(",")} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, recipients: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })} />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Filters (JSON)</label>
-                <Input placeholder='{"from": "24h", "to": "now"}' value={JSON.stringify(form.filters)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { try { setForm({ ...form, filters: JSON.parse(e.target.value || "{}" ) }); } catch {} }} />
+                <label className="block text-[11px] text-slate-500 mb-1">Filters</label>
+                <ReportFilterBuilder
+                  filters={form.filters as Record<string, unknown>}
+                  onChange={(filters) =>
+                    setForm({ ...form, filters })
+                  }
+                />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Enabled</label>
