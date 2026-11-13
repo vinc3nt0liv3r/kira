@@ -26,6 +26,7 @@ export default function CustomReportsManager() {
   const [templates, setTemplates] = useState<ReportTemplateResponse[]>([]);
   const [customReports, setCustomReports] = useState<CustomReportResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"templates" | "reports" | "results">("templates");
   const [openTemplate, setOpenTemplate] = useState(false);
   const [openReport, setOpenReport] = useState(false);
@@ -53,6 +54,7 @@ export default function CustomReportsManager() {
   }, []);
 
   const load = async () => {
+    setLoadError(null);
     try {
       const [tplData, repData] = await Promise.all([
         api.listReportTemplates(),
@@ -60,8 +62,8 @@ export default function CustomReportsManager() {
       ]);
       setTemplates(tplData.templates);
       setCustomReports(repData.reports);
-    } catch {
-      // Silent fail
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Failed to load custom reports");
     } finally {
       setLoading(false);
     }
@@ -175,6 +177,7 @@ export default function CustomReportsManager() {
           </Button>
         </div>
       </div>
+      {loadError && <p role="alert" className="mb-3 text-xs text-rose-400">{loadError}</p>}
 
       <div className="flex gap-2 mb-4">
         <Button

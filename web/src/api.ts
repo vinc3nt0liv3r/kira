@@ -132,7 +132,7 @@ export const api = {
 
   // Alert rules
   listAlertRules: (signal?: AbortSignal) =>
-    get<{ rules: AlertRuleResponse[] }>("/api/v1/alerts/rules", {}, signal),
+    get<{ rules: AlertRuleResponse[] }>("/alerts/rules", {}, signal),
   createAlertRule: async (payload: CreateAlertRule): Promise<AlertRuleResponse> => {
     const res = await fetch(`${BASE}/alerts/rules`, {
       method: "POST",
@@ -194,7 +194,7 @@ export const api = {
     }
   },
   listAlertInstances: (signal?: AbortSignal) =>
-    get<{ instances: AlertInstance[] }>("/api/v1/alerts/instances", {}, signal),
+    get<{ instances: AlertInstance[] }>("/alerts/instances", {}, signal),
   acknowledgeAlertInstance: async (id: string, acknowledged_by: string): Promise<void> => {
     const res = await fetch(`${BASE}/alerts/instances/${id}/acknowledge`, {
       method: "POST",
@@ -216,7 +216,7 @@ export const api = {
     }
   },
   listWebhookDeliveries: (instanceId: string, signal?: AbortSignal) =>
-    get<{ deliveries: WebhookDelivery[] }>(`/api/v1/alerts/instances/${instanceId}/webhook-deliveries`, {}, signal),
+    get<{ deliveries: WebhookDelivery[] }>(`/alerts/instances/${instanceId}/webhook-deliveries`, {}, signal),
   testWebhook: async (url: string): Promise<TestWebhookResult> => {
     const res = await fetch(`${BASE}/webhook/test`, {
       method: "POST",
@@ -241,7 +241,7 @@ export const api = {
 
   // Report schedules
   listReportSchedules: (signal?: AbortSignal) =>
-    get<{ schedules: ReportScheduleResponse[] }>("/api/v1/reports/schedules", {}, signal),
+    get<{ schedules: ReportScheduleResponse[] }>("/reports/schedules", {}, signal),
   createReportSchedule: async (payload: CreateReportSchedule): Promise<ReportScheduleResponse> => {
     const res = await fetch(`${BASE}/reports/schedules`, {
       method: "POST",
@@ -303,7 +303,7 @@ export const api = {
     }
   },
   listReportResults: (scheduleId: string, signal?: AbortSignal) =>
-    get<{ results: ReportResult[] }>(`/api/v1/reports/schedules/${scheduleId}/results`, {}, signal),
+    get<{ results: ReportResult[] }>(`/reports/schedules/${scheduleId}/results`, {}, signal),
   generateReportNow: async (scheduleId: string): Promise<{ message: string }> => {
     const res = await fetch(`${BASE}/reports/schedules/${scheduleId}/generate`, {
       method: "POST",
@@ -397,7 +397,7 @@ export const api = {
 
   // Custom Reports
   listReportTemplates: (signal?: AbortSignal) =>
-    get<{ templates: ReportTemplateResponse[] }>("/api/v1/reports/templates", {}, signal),
+    get<{ templates: ReportTemplateResponse[] }>("/reports/templates", {}, signal),
   createReportTemplate: async (payload: CreateReportTemplate): Promise<ReportTemplateResponse> => {
     const res = await fetch(`${BASE}/reports/templates`, {
       method: "POST",
@@ -437,7 +437,7 @@ export const api = {
     }
   },
   listCustomReports: (signal?: AbortSignal) =>
-    get<{ reports: CustomReportResponse[] }>("/api/v1/reports/custom", {}, signal),
+    get<{ reports: CustomReportResponse[] }>("/reports/custom", {}, signal),
   createCustomReport: async (payload: CreateCustomReport): Promise<CustomReportResponse> => {
     const res = await fetch(`${BASE}/reports/custom`, {
       method: "POST",

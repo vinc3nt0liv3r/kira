@@ -1034,10 +1034,10 @@ pub async fn events_export(
     let client = state.store.pool().get().await?;
     let rows = client
         .query(
-            "SELECT ts, log_type, log_component, category_group, action, display_user,
-                    COALESCE(domain, host(dst_ip)) AS destination, application, category,
+            "SELECT ts, log_type, log_component, category_group AS \"group\", action, display_user,
+                    COALESCE(domain, dst_ip) AS destination, application, category,
                     COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type,
-                    url, host(src_ip) AS src_ip, host(dst_ip) AS dst_ip, fw_rule_name,
+                    url, src_ip, dst_ip, fw_rule_name,
                     sent_bytes, recv_bytes, threat_name, message, device_name
              FROM (
                  SELECT tenant_id, id, ts, category_group, action, log_type, log_component, device_name,
@@ -1996,7 +1996,7 @@ pub async fn generate_report_on_demand(
     let client = state.store.pool().get().await?;
     let rows = client
         .query(
-            "SELECT ts, log_type, log_component, category_group, action, display_user,
+            "SELECT ts, log_type, log_component, category_group AS \"group\", action, display_user,
                     destination, application, category, category_type,
                     url, src_ip, dst_ip, fw_rule_name,
                     sent_bytes, recv_bytes, threat_name, message, device_name
